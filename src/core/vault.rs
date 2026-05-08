@@ -1,0 +1,610 @@
+use std::path::Path;
+use chrono::Utc;
+use uuid::Uuid;
+
+use crate::config::AppConfig;
+use crate::core::key::{KeyEntry, KeyType, Environment};
+use crate::core::group::Group;
+use crate::core::audit::{AuditEntry, AuditAction};
+use crate::crypto::encryption::EncryptionEngine;
+use crate::crypto::kdf::KeyDeriver;
+use crate::error::AppError;
+use crate::storage::database::Database;
+use crate::storage::repository::Repository;
+use crate::validation;
+
+/// Vault 状态
+#[derive(Debug, Clone, PartialEq)]
+pub enum VaultState {
+    /// 未初始化
+    Uninitialized,
+    /// 已锁定
+    Locked,
+    /// 已解锁
+    Unlocked,
+}
+
+/// Vault 核心结构
+pub struct Vault {
+    config: AppConfig,
+    db: Option<Database>,
+    master_key: Option<Vec<u8>>,
+    state: VaultState,
+    last_activity: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Vault {
+    pub fn new(config: AppConfig) -> Self {
+        Self {
+            config,
+            db: None,
+            master_key: None,
+            state: VaultState::Uninitialized,
+            last_activity: None,
+        }
+    }
+
+    /// 获取当前状态
+    pub fn state(&self) -> &VaultState {
+        &self.state
+    }
+
+    /// 重置 Vault（删除所有数据文件）
+    pub fn reset(&mut self) -> Result<(), AppError> {
+        let db_path = self.config.vault_path.join("vault.db");
+        let salt_path = self.config.vault_path.join(".salt");
+        let backup_dir = self.config.vault_path.join("backups");
+
+        if db_path.exists() {
+            std::fs::remove_file(&db_path)
+                .map_err(|e| AppError::IoError(format!("Failed to remove vault database: {}", e)))?;
+        }
+        if salt_path.exists() {
+            std::fs::remove_file(&salt_path)
+                .map_err(|e| AppError::IoError(format!("Failed to remove salt file: {}", e)))?;
+        }
+        if backup_dir.exists() {
+            std::fs::remove_dir_all(&backup_dir)
+                .map_err(|e| AppError::IoError(format!("Failed to remove backup directory: {}", e)))?;
+        }
+
+        self.db = None;
+        self.master_key = None;
+        self.state = VaultState::Uninitialized;
+        self.last_activity = None;
+
+        Ok(())
+    }
+
+    /// 初始化 Vault
+    pub fn init(&mut self, password: &str) -> Result<(), AppError> {
+        std::fs::create_dir_all(&self.config.vault_path)
+            .map_err(|e| AppError::IoError(format!("Failed to create vault directory: {}", e)))?;
+
+        let db_path = self.config.vault_path.join("vault.db");
+
+        if db_path.exists() {
+            return Err(AppError::VaultAlreadyInitialized);
+        }
+
+        let db = Database::open(&db_path)?;
+
+        // 派生主密钥
+        let kdf = KeyDeriver::new();
+        let salt = crate::crypto::kdf::generate_salt();
+        let master_key = kdf.derive_key(password, &salt)?;
+
+        // 存储 salt
+        let salt_path = self.config.vault_path.join(".salt");
+        std::fs::write(&salt_path, &salt)
+            .map_err(|e| AppError::IoError(format!("Failed to write salt: {}", e)))?;
+
+        self.db = Some(db);
+        self.master_key = Some(master_key.clone());
+        self.state = VaultState::Unlocked;
+        self.last_activity = Some(Utc::now());
+
+        self.log_action(AuditAction::VaultUnlocked, "vault", None, None)?;
+
+        Ok(())
+    }
+
+    /// 检查 Vault 是否已初始化
+    pub fn is_initialized(&self) -> bool {
+        let db_path = self.config.vault_path.join("vault.db");
+        db_path.exists()
+    }
+
+    /// 解锁 Vault
+    pub fn unlock(&mut self, password: &str) -> Result<(), AppError> {
+        let db_path = self.config.vault_path.join("vault.db");
+        if !db_path.exists() {
+            return Err(AppError::VaultNotInitialized);
+        }
+
+        let salt_path = self.config.vault_path.join(".salt");
+        let salt = std::fs::read(&salt_path)
+            .map_err(|e| AppError::IoError(format!("Failed to read salt: {}", e)))?;
+
+        let kdf = KeyDeriver::new();
+        let master_key = kdf.derive_key(password, &salt)?;
+
+        let db = Database::open(&db_path)?;
+
+        self.db = Some(db);
+        self.master_key = Some(master_key);
+        self.state = VaultState::Unlocked;
+        self.last_activity = Some(Utc::now());
+
+        self.log_action(AuditAction::VaultUnlocked, "vault", None, None)?;
+
+        Ok(())
+    }
+
+    /// 锁定 Vault
+    pub fn lock(&mut self) {
+        if let Some(ref mut key) = self.master_key {
+            zeroize::Zeroize::zeroize(key);
+        }
+        self.master_key = None;
+        self.db = None;
+        self.state = VaultState::Locked;
+    }
+
+    /// 检查是否需要自动锁定
+    pub fn check_auto_lock(&mut self) {
+        if self.state != VaultState::Unlocked {
+            return;
+        }
+        if let Some(last) = self.last_activity {
+            let elapsed = Utc::now() - last;
+            if elapsed.num_minutes() >= self.config.auto_lock_minutes as i64 {
+                self.lock();
+            }
+        }
+    }
+
+    /// 获取仓库引用
+    fn repo(&self) -> Result<Repository<'_>, AppError> {
+        let db = self.db.as_ref().ok_or(AppError::VaultLocked)?;
+        Ok(Repository::new(db))
+    }
+
+    /// 更新活动时间
+    fn touch(&mut self) {
+        self.last_activity = Some(Utc::now());
+    }
+
+    /// 获取加密引擎
+    fn encryptor(&self) -> Result<EncryptionEngine, AppError> {
+        let key = self.master_key.as_ref().ok_or(AppError::VaultLocked)?;
+        let mut key_bytes = [0u8; 32];
+        key_bytes.copy_from_slice(&key[..32]);
+        Ok(EncryptionEngine::new(&key_bytes))
+    }
+
+    /// 记录审计日志
+    fn log_action(&self, action: AuditAction, resource_type: &str, resource_id: Option<String>, details: Option<serde_json::Value>) -> Result<(), AppError> {
+        if !self.config.audit_log_enabled {
+            return Ok(());
+        }
+        if let Some(ref db) = self.db {
+            let repo = Repository::new(db);
+            let entry = AuditEntry::new(action, resource_type.to_string(), resource_id, details);
+            repo.insert_audit_log(&entry)?;
+        }
+        Ok(())
+    }
+
+    // ==================== 密钥操作 ====================
+
+    /// 添加密钥
+    pub fn add_key(
+        &mut self,
+        name: String,
+        provider: String,
+        key_type: KeyType,
+        value: &str,
+        environment: Environment,
+        description: Option<String>,
+        group_id: Option<Uuid>,
+        tags: Vec<String>,
+    ) -> Result<KeyEntry, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        validation::validate_key_name(&name)?;
+
+        let result = validation::validate_key_format(value, &key_type);
+        for warning in &result.warnings {
+            eprintln!("Warning: {}", warning);
+        }
+
+        let repo = self.repo()?;
+        if repo.get_key_by_name(&name, &environment.to_string())?.is_some() {
+            return Err(AppError::DuplicateKey(name));
+        }
+
+        let encryptor = self.encryptor()?;
+        let encrypted_value = encryptor.encrypt(value.as_bytes())?;
+
+        let mut entry = KeyEntry::new(name, provider, key_type, encrypted_value);
+        entry.environment = environment;
+        entry.description = description;
+        entry.group_id = group_id;
+        entry.tags = tags;
+
+        let repo = self.repo()?;
+        repo.insert_key(&entry)?;
+
+        self.log_action(
+            AuditAction::KeyCreated,
+            "key",
+            Some(entry.id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(entry)
+    }
+
+    /// 获取密钥（解密）
+    pub fn get_key(&mut self, name: &str, environment: &str) -> Result<(KeyEntry, String), AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let entry = repo.get_key_by_name(name, environment)?
+            .ok_or_else(|| AppError::KeyNotFound(name.to_string()))?;
+
+        let encryptor = self.encryptor()?;
+        let decrypted = encryptor.decrypt(&entry.encrypted_value)?;
+        let value = String::from_utf8(decrypted)
+            .map_err(|_| AppError::InvalidInput("Invalid UTF-8 in key value".to_string()))?;
+
+        self.log_action(
+            AuditAction::KeyViewed,
+            "key",
+            Some(entry.id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok((entry, value))
+    }
+
+    /// 列出所有密钥
+    pub fn list_keys(&mut self) -> Result<Vec<KeyEntry>, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let keys = repo.list_keys()?;
+        self.touch();
+        Ok(keys)
+    }
+
+    /// 搜索密钥
+    pub fn search_keys(&mut self, query: &str) -> Result<Vec<KeyEntry>, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let keys = repo.search_keys(query)?;
+        self.touch();
+        Ok(keys)
+    }
+
+    /// 更新密钥
+    pub fn update_key(&mut self, name: &str, environment: &str, new_value: Option<&str>, new_description: Option<&str>, new_tags: Option<Vec<String>>) -> Result<KeyEntry, AppError> {
+        self.update_key_full(name, environment, new_value, None, new_description, new_tags, None)
+    }
+
+    /// 更新密钥（完整版本，支持所有字段）
+    pub fn update_key_full(
+        &mut self,
+        name: &str,
+        environment: &str,
+        new_value: Option<&str>,
+        new_key_type: Option<KeyType>,
+        new_description: Option<&str>,
+        new_tags: Option<Vec<String>>,
+        new_group_id: Option<Option<Uuid>>,
+    ) -> Result<KeyEntry, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let mut entry = repo.get_key_by_name(name, environment)?
+            .ok_or_else(|| AppError::KeyNotFound(name.to_string()))?;
+
+        if let Some(value) = new_value {
+            let encryptor = self.encryptor()?;
+            entry.encrypted_value = encryptor.encrypt(value.as_bytes())?;
+            entry.version += 1;
+        }
+
+        if let Some(kt) = new_key_type {
+            entry.key_type = kt;
+        }
+
+        if let Some(desc) = new_description {
+            entry.description = Some(desc.to_string());
+        }
+
+        if let Some(tags) = new_tags {
+            entry.tags = tags;
+        }
+
+        if let Some(gid) = new_group_id {
+            entry.group_id = gid;
+        }
+
+        entry.updated_at = Utc::now();
+
+        let repo = self.repo()?;
+        repo.update_key(&entry)?;
+
+        self.log_action(
+            AuditAction::KeyUpdated,
+            "key",
+            Some(entry.id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(entry)
+    }
+
+    /// 删除密钥
+    pub fn delete_key(&mut self, name: &str, environment: &str) -> Result<(), AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let entry = repo.get_key_by_name(name, environment)?
+            .ok_or_else(|| AppError::KeyNotFound(name.to_string()))?;
+
+        repo.delete_key(&entry.id)?;
+
+        self.log_action(
+            AuditAction::KeyDeleted,
+            "key",
+            Some(entry.id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(())
+    }
+
+    /// 旋转密钥
+    pub fn rotate_key(&mut self, name: &str, environment: &str, new_value: &str) -> Result<KeyEntry, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let mut entry = repo.get_key_by_name(name, environment)?
+            .ok_or_else(|| AppError::KeyNotFound(name.to_string()))?;
+
+        let encryptor = self.encryptor()?;
+        entry.encrypted_value = encryptor.encrypt(new_value.as_bytes())?;
+        entry.version += 1;
+        entry.updated_at = Utc::now();
+
+        let repo = self.repo()?;
+        repo.update_key(&entry)?;
+
+        self.log_action(
+            AuditAction::KeyRotated,
+            "key",
+            Some(entry.id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(entry)
+    }
+
+    /// 获取即将过期的密钥
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn get_expiring_keys(&mut self, hours: i64) -> Result<Vec<KeyEntry>, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let keys = repo.get_expiring_keys(hours)?;
+        self.touch();
+        Ok(keys)
+    }
+
+    // ==================== 分组操作 ====================
+
+    /// 创建分组
+    pub fn create_group(&mut self, name: String, parent_id: Option<Uuid>) -> Result<Group, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let group = Group::new(name, parent_id);
+        let repo = self.repo()?;
+        repo.insert_group(&group)?;
+
+        self.log_action(
+            AuditAction::GroupCreated,
+            "group",
+            Some(group.id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(group)
+    }
+
+    /// 列出所有分组
+    pub fn list_groups(&mut self) -> Result<Vec<Group>, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let groups = repo.list_groups()?;
+        self.touch();
+        Ok(groups)
+    }
+
+    /// 删除分组
+    pub fn delete_group(&mut self, id: &Uuid) -> Result<(), AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        repo.delete_group(id)?;
+
+        self.log_action(
+            AuditAction::GroupDeleted,
+            "group",
+            Some(id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(())
+    }
+
+    // ==================== 审计日志 ====================
+
+    /// 获取审计日志
+    pub fn get_audit_logs(&mut self, limit: i64) -> Result<Vec<AuditEntry>, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let logs = repo.list_audit_logs(limit)?;
+        self.touch();
+        Ok(logs)
+    }
+
+    // ==================== 导入导出 ====================
+
+    /// 导入密钥
+    pub fn import_keys(&mut self, records: Vec<(String, String, String, String)>, environment: Environment) -> Result<usize, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let encryptor = self.encryptor()?;
+        let mut imported = 0;
+
+        for (name, provider, key_type_str, value) in records {
+            if value.is_empty() {
+                continue;
+            }
+
+            let key_type = KeyType::from_str(&key_type_str);
+
+            let encrypted_value = encryptor.encrypt(value.as_bytes())?;
+            let entry = KeyEntry::new(name, provider, key_type, encrypted_value);
+            let entry = KeyEntry {
+                environment: environment.clone(),
+                ..entry
+            };
+
+            let repo = self.repo()?;
+            if repo.get_key_by_name(&entry.name, &entry.environment.to_string())?.is_some() {
+                continue;
+            }
+            repo.insert_key(&entry)?;
+            imported += 1;
+        }
+
+        self.log_action(
+            AuditAction::KeyImported,
+            "key",
+            None,
+            Some(serde_json::json!({ "count": imported })),
+        )?;
+
+        self.touch();
+        Ok(imported)
+    }
+
+    // ==================== 备份恢复 ====================
+
+    /// 创建备份
+    pub fn backup(&self, backup_path: &Path) -> Result<(), AppError> {
+        let db_path = self.config.vault_path.join("vault.db");
+        if !db_path.exists() {
+            return Err(AppError::VaultNotInitialized);
+        }
+
+        std::fs::copy(&db_path, backup_path)
+            .map_err(|e| AppError::IoError(format!("Failed to create backup: {}", e)))?;
+
+        self.log_action(
+            AuditAction::BackupCreated,
+            "backup",
+            Some(backup_path.to_string_lossy().to_string()),
+            None,
+        )?;
+
+        Ok(())
+    }
+
+    /// 从备份恢复
+    pub fn restore(&mut self, backup_path: &Path) -> Result<(), AppError> {
+        let db_path = self.config.vault_path.join("vault.db");
+
+        self.lock();
+
+        std::fs::copy(backup_path, &db_path)
+            .map_err(|e| AppError::IoError(format!("Failed to restore backup: {}", e)))?;
+
+        self.state = VaultState::Locked;
+
+        self.log_action(
+            AuditAction::BackupRestored,
+            "backup",
+            Some(backup_path.to_string_lossy().to_string()),
+            None,
+        )?;
+
+        Ok(())
+    }
+
+    // ==================== 配置 ====================
+
+    /// 获取配置引用
+    pub fn config(&self) -> &AppConfig {
+        &self.config
+    }
+
+    /// 获取配置可变引用
+    pub fn config_mut(&mut self) -> &mut AppConfig {
+        &mut self.config
+    }
+}
