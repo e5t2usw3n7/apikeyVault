@@ -183,7 +183,7 @@ fn start_desktop_gui(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
     let native_options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 700.0])
-            .with_min_inner_size([800.0, 500.0])
+            .with_min_inner_size([960.0, 600.0])
             .with_title("API Key Vault")
             .with_icon(create_app_icon()),
         ..Default::default()

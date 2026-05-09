@@ -19,7 +19,22 @@ pub fn execute(cli: Cli) -> Result<(), ApiKeyError> {
 
     let mut vault = Vault::new(config);
 
-    match cli.command {
+    // 对于非 Init/Unlock/Lock/Status/Gui 命令，自动尝试从会话恢复
+    // session 由 Vault 核心（vault.rs）自动管理：init/unlock 自动保存，lock 自动清除
+    let needs_unlock = matches!(cli.command,
+        Commands::Init { .. } |
+        Commands::Unlock |
+        Commands::Lock |
+        Commands::Status |
+        Commands::Gui |
+        Commands::Shell { .. }
+    );
+
+    if !needs_unlock {
+        let _ = vault.try_restore_session();
+    }
+
+    let result = match cli.command {
         Commands::Init { force } => cmd_init(&mut vault, force),
         Commands::Unlock => cmd_unlock(&mut vault),
         Commands::Lock => cmd_lock(&mut vault),
@@ -44,7 +59,9 @@ pub fn execute(cli: Cli) -> Result<(), ApiKeyError> {
             // GUI 命令由 main.rs 单独处理
             Ok(())
         },
-    }
+    };
+
+    result
 }
 
 fn load_config(cli: &Cli) -> Result<AppConfig, ApiKeyError> {
@@ -81,6 +98,7 @@ fn cmd_init(vault: &mut Vault, force: bool) -> Result<(), ApiKeyError> {
     }
 
     vault.init(&password)?;
+    // session 由 Vault 核心自动保存，无需额外操作
     println!("✓ Vault 初始化成功");
     Ok(())
 }
@@ -92,12 +110,14 @@ fn cmd_unlock(vault: &mut Vault) -> Result<(), ApiKeyError> {
 
     let password = prompt_password("输入主密码: ")?;
     vault.unlock(&password)?;
+    // session 由 Vault 核心自动保存，无需额外操作
     println!("✓ Vault 已解锁");
     Ok(())
 }
 
 fn cmd_lock(vault: &mut Vault) -> Result<(), ApiKeyError> {
     vault.lock();
+    // session 由 Vault 核心自动清除，无需额外操作
     println!("✓ Vault 已锁定");
     Ok(())
 }
@@ -371,7 +391,8 @@ fn cmd_export(vault: &mut Vault, format: ImportFormat, file: &std::path::Path, e
 }
 
 fn cmd_env(vault: &mut Vault, name: &str, var: Option<String>, shell_type: Option<ShellType>) -> Result<(), ApiKeyError> {
-    let (_entry, value) = vault.get_key(name, "development")?;
+    let env = vault.config().default_environment.clone();
+    let (_entry, value) = vault.get_key(name, &env)?;
     let env_name = var.unwrap_or_else(|| name.to_uppercase().replace('-', "_").replace(' ', "_"));
 
     let shell = shell_type

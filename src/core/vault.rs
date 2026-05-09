@@ -28,6 +28,7 @@ pub enum VaultState {
 pub struct Vault {
     config: AppConfig,
     db: Option<Database>,
+    session_enabled: bool,       // 是否启用会话持久化（default: true）
     master_key: Option<Vec<u8>>,
     state: VaultState,
     last_activity: Option<chrono::DateTime<chrono::Utc>>,
@@ -38,6 +39,7 @@ impl Vault {
         Self {
             config,
             db: None,
+            session_enabled: true,
             master_key: None,
             state: VaultState::Uninitialized,
             last_activity: None,
@@ -49,11 +51,80 @@ impl Vault {
         &self.state
     }
 
+    // ==================== 会话持久化管理 ====================
+
+    /// 启用/禁用会话持久化
+    pub fn set_session_enabled(&mut self, enabled: bool) {
+        self.session_enabled = enabled;
+    }
+
+    /// 会话文件路径
+    fn session_path(&self) -> std::path::PathBuf {
+        self.config.vault_path.join(".session")
+    }
+
+    /// 保存会话：将 master_key 写入会话文件
+    fn save_session(&self) -> Result<(), AppError> {
+        if !self.session_enabled {
+            return Ok(());
+        }
+        if let Some(ref key) = self.master_key {
+            std::fs::write(self.session_path(), key)
+                .map_err(|e| AppError::IoError(format!("无法保存会话: {}", e)))?;
+        }
+        Ok(())
+    }
+
+    /// 清除会话文件
+    fn clear_session(&self) {
+        if !self.session_enabled {
+            return;
+        }
+        let path = self.session_path();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// 尝试从会话文件恢复解锁状态
+    /// 返回 true 表示恢复成功，false 表示无可恢复会话
+    pub fn try_restore_session(&mut self) -> Result<bool, AppError> {
+        if self.state != VaultState::Uninitialized && self.state != VaultState::Locked {
+            return Ok(false);
+        }
+
+        let session_file = self.session_path();
+        if !session_file.exists() {
+            return Ok(false);
+        }
+
+        match std::fs::read(&session_file) {
+            Ok(master_key) => {
+                match self.unlock_with_master_key(master_key) {
+                    Ok(()) => Ok(true),
+                    Err(_) => {
+                        // 会话文件无效，清除
+                        let _ = std::fs::remove_file(&session_file);
+                        Ok(false)
+                    }
+                }
+            }
+            Err(_) => {
+                // 无法读取会话文件，清除
+                let _ = std::fs::remove_file(&session_file);
+                Ok(false)
+            }
+        }
+    }
+
+    // ==================== 初始化/锁定/解锁 ====================
+
     /// 重置 Vault（删除所有数据文件）
     pub fn reset(&mut self) -> Result<(), AppError> {
         let db_path = self.config.vault_path.join("vault.db");
         let salt_path = self.config.vault_path.join(".salt");
         let backup_dir = self.config.vault_path.join("backups");
+
+        // 清除会话
+        self.clear_session();
 
         if db_path.exists() {
             std::fs::remove_file(&db_path)
@@ -104,6 +175,9 @@ impl Vault {
         self.state = VaultState::Unlocked;
         self.last_activity = Some(Utc::now());
 
+        // 保存会话，后续命令无需重复输入密码
+        self.save_session()?;
+
         self.log_action(AuditAction::VaultUnlocked, "vault", None, None)?;
 
         Ok(())
@@ -136,13 +210,35 @@ impl Vault {
         self.state = VaultState::Unlocked;
         self.last_activity = Some(Utc::now());
 
+        // 保存会话，后续命令无需重复输入密码
+        self.save_session()?;
+
         self.log_action(AuditAction::VaultUnlocked, "vault", None, None)?;
+
+        Ok(())
+    }
+
+    /// 使用已有的 master key 解锁（用于从会话恢复）
+    pub fn unlock_with_master_key(&mut self, master_key: Vec<u8>) -> Result<(), AppError> {
+        let db_path = self.config.vault_path.join("vault.db");
+        if !db_path.exists() {
+            return Err(AppError::VaultNotInitialized);
+        }
+
+        let db = Database::open(&db_path)?;
+        self.db = Some(db);
+        self.master_key = Some(master_key);
+        self.state = VaultState::Unlocked;
+        self.last_activity = Some(Utc::now());
 
         Ok(())
     }
 
     /// 锁定 Vault
     pub fn lock(&mut self) {
+        // 清除会话文件（锁定后不可恢复）
+        self.clear_session();
+
         if let Some(ref mut key) = self.master_key {
             zeroize::Zeroize::zeroize(key);
         }
@@ -606,5 +702,10 @@ impl Vault {
     /// 获取配置可变引用
     pub fn config_mut(&mut self) -> &mut AppConfig {
         &mut self.config
+    }
+
+    /// 获取 master key 的引用（用于保存会话）
+    pub fn get_master_key(&self) -> Option<&Vec<u8>> {
+        self.master_key.as_ref()
     }
 }
