@@ -167,7 +167,7 @@ fn dark_theme() -> ThemeColors {
 fn light_theme() -> ThemeColors {
     ThemeColors {
         bg_primary: Color32::from_rgb(245, 245, 250),         // 浅灰白色背景
-        bg_secondary: Color32::from_rgb(235, 235, 242),       // 略深的次要背景
+        bg_secondary: Color32::from_rgb(160, 160, 180),       // 略深的次要背景
         bg_sidebar: Color32::from_rgb(225, 225, 235),         // 侧边栏浅灰色
         bg_card: Color32::from_rgb(255, 255, 255),            // 纯白卡片底色
         bg_input: Color32::from_rgb(240, 240, 248),           // 输入框底色
@@ -709,9 +709,9 @@ impl VaultApp {
 
                 // 根据折叠状态决定显示内容
                 let btn_text = if self.sidebar_collapsed {
-                    RichText::new(icon).size(14.0)  // 折叠时只显示图标
+                    RichText::new(format!("  {}", icon)).size(14.0)  // 折叠时只显示图标
                 } else {
-                    RichText::new(format!("{}  {}", icon, label)).size(14.0)  // 展开时显示 图标+标签
+                    RichText::new(format!("  {}       {}", icon, label)).size(14.0)  // 展开时显示 图标+标签
                 };
 
                 // 根据激活状态设置按钮样式
@@ -3310,7 +3310,7 @@ impl eframe::App for VaultApp {
             egui::SidePanel::left("sidebar")
                 .resizable(false)  // 不可调整宽度
                 .exact_width(if self.sidebar_collapsed { 56.0 } else { 200.0 })  // 折叠/展开宽度
-                .frame(egui::Frame::none().fill(theme.bg_sidebar).inner_margin(0.0))
+                .frame(egui::Frame::none().fill(theme.bg_sidebar).inner_margin(10.0))
                 .show(ctx, |ui| {
                     self.show_sidebar(ui, &theme);
                 });
