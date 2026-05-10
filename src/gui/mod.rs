@@ -709,7 +709,7 @@ impl VaultApp {
 
                 // 根据折叠状态决定显示内容
                 let btn_text = if self.sidebar_collapsed {
-                    RichText::new(icon).size(20.0)  // 折叠时只显示图标
+                    RichText::new(icon).size(14.0)  // 折叠时只显示图标
                 } else {
                     RichText::new(format!("{}  {}", icon, label)).size(14.0)  // 展开时显示 图标+标签
                 };
@@ -719,13 +719,13 @@ impl VaultApp {
                     // 激活状态：主题色文字 + 高亮背景
                     egui::Button::new(btn_text.color(theme.accent))
                         .fill(Color32::from_rgb(40, 38, 65))      // 深紫灰色背景
-                        .min_size(Vec2::new(if self.sidebar_collapsed { 40.0 } else { 176.0 }, 36.0))
+                        .min_size(Vec2::new(if self.sidebar_collapsed { 36.0 } else { 176.0 }, 36.0))
                         .rounding(Rounding::same(6.0))           // 6px圆角
                 } else {
                     // 非激活状态：次要色文字 + 透明背景
                     egui::Button::new(btn_text.color(theme.text_secondary))
                         .fill(Color32::TRANSPARENT)
-                        .min_size(Vec2::new(if self.sidebar_collapsed { 40.0 } else { 176.0 }, 36.0))
+                        .min_size(Vec2::new(if self.sidebar_collapsed { 36.0 } else { 176.0 }, 36.0))
                         .rounding(Rounding::same(6.0))
                 };
 
@@ -1206,35 +1206,41 @@ impl VaultApp {
             // 收集所有不同的提供商，计算提供商数量
             let providers: std::collections::HashSet<String> = self.key_list.iter().map(|k| k.provider.clone()).collect();
 
-            // 计算每个卡片的宽度（总宽度减去3个间隙略多一点保持美观，再除以4）
-            let card_width = (ui.available_width() - 72.0) / 4.0;
+            // 获取实际的可用宽度（考虑侧边栏占用的空间）
+            let avail_w = ui.available_width();
+            // 每个卡片留更多安全余量
+            let card_width = (avail_w - 61.0) / 4.0; // -61 最美观
 
-            // 水平排列4个统计卡片
+            // 水平排列4个统计卡片，限制最大宽度防止溢出
             ui.horizontal(|ui| {
+                ui.set_max_width(avail_w);
                 self.show_stat_card(ui, &theme, "🔑", "密钥总数", &total_keys.to_string(), card_width);
-                ui.add_space(16.0);
+                ui.add_space(10.0);
                 self.show_stat_card(ui, &theme, "📁", "分组总数", &total_groups.to_string(), card_width);
-                ui.add_space(16.0);
+                ui.add_space(10.0);
                 self.show_stat_card(ui, &theme, "🏢", "提供商数", &providers.len().to_string(), card_width);
-                ui.add_space(16.0);
+                ui.add_space(10.0);
                 self.show_stat_card(ui, &theme, "📋", "操作记录", &total_logs.to_string(), card_width);
             });
 
             ui.add_space(20.0);
 
             // ===== 环境统计和提供商统计并排 =====
+            let avail_w2 = ui.available_width();
             ui.horizontal(|ui| {
-                let half_width = (ui.available_width() - 16.0) / 2.0;  // 各占一半宽度
+                ui.set_max_width(avail_w2);
+                let half_width = (avail_w2 - 110.0) / 2.0;  // 各占一半宽度（留更多余量）
                 self.show_env_stats_card(ui, &theme, half_width);      // 环境分布柱状图
-                ui.add_space(16.0);
+                ui.add_space(12.0);
                 self.show_provider_stats_card(ui, &theme, half_width); // 提供商分布柱状图
             });
 
             ui.add_space(20.0);
 
             // ===== 快捷操作和最近日志（纵向排列）=====
-            // 快捷操作面板上方留白内边距
-            let panel_inner_width = (ui.available_width() - 32.0).max(40.0);
+            // 快捷操作面板上方留白内边距（改用available_width计算，留更多余量）
+            let avail_w3 = ui.available_width();
+            let panel_inner_width = (avail_w3 - 48.0).max(40.0);
 
             // ===== 上：快捷操作面板 =====
             egui::Frame::none()
@@ -1243,9 +1249,10 @@ impl VaultApp {
                 .rounding(Rounding::same(8.0))
                 .inner_margin(16.0)
                 .show(ui, |ui| {
-                    ui.set_min_width(panel_inner_width);
+                    ui.set_min_width(panel_inner_width + 9.0);// 好看，以后不要改+9.0
+                    ui.set_width(panel_inner_width - 10.0);// 好看，以后不要改-10.0
                     ui.label(RichText::new("⚡ 快捷操作").size(15.0).strong().color(theme.text_primary));
-                    ui.add_space(12.0);
+                    ui.add_space(8.0);
 
                     // 三个快捷按钮：添加密钥、搜索、导入
                     ui.horizontal(|ui| {
@@ -1292,7 +1299,8 @@ impl VaultApp {
                 .rounding(Rounding::same(8.0))
                 .inner_margin(16.0)
                 .show(ui, |ui| {
-                    ui.set_min_width(panel_inner_width);
+                    ui.set_min_width(panel_inner_width + 9.0);// 好看，以后不要改+9.0
+                    ui.set_width(panel_inner_width - 10.0);// 好看，以后不要改-10.0
                     ui.label(RichText::new("📋 最近操作").size(15.0).strong().color(theme.text_primary));
                     ui.add_space(8.0);
 
@@ -1303,7 +1311,7 @@ impl VaultApp {
                     } else {
                         // 计算最近操作面板内的可用宽度分配：
                         // 可用总宽 = panel_inner_width，减去图标(20px)、时间戳(65px)、间距(20px)后给操作名称
-                        let action_w = (panel_inner_width - 105.0).max(60.0);
+                        let action_w = (panel_inner_width - 85.0).max(60.0);
                         let time_w = 65.0;
 
                         for log in &recent_logs {
@@ -1355,20 +1363,28 @@ impl VaultApp {
         // 减去左右内边距（16 + 16 = 32），得到实际内容区最小宽度
         let inner_width = (total_width - 32.0).max(40.0);
 
+        // 通过 allocate_exact_size 在父布局中精确分配 width 宽度
+        let (rect, _) = ui.allocate_exact_size(
+            Vec2::new(total_width, 100.0),
+            egui::Sense::hover(),
+        );
+
+        // 用分配的矩形创建子 UI，Frame 在其中绘制，不会溢出
+        let mut frame_ui = ui.child_ui(rect, egui::Layout::top_down(egui::Align::LEFT), None);
+
         egui::Frame::none()
             .fill(theme.bg_card)
             .stroke(Stroke::new(1.0, theme.border))
             .rounding(Rounding::same(8.0))
-            .inner_margin(16.0)                       // 左右各16px内边距，合计32px
-            .show(ui, |ui| {
-                ui.set_min_width(inner_width);        // 设置内容区最小宽度（减去内边距后的值）
+            .inner_margin(16.0)
+            .show(&mut frame_ui, |ui| {
+                ui.set_width(inner_width);
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(icon).size(20.0));     // 图标（大号）
-                        ui.label(RichText::new(title).size(13.0).color(theme.text_secondary));  // 标题
+                        ui.label(RichText::new(icon).size(20.0));
+                        ui.label(RichText::new(title).size(13.0).color(theme.text_secondary));
                     });
                     ui.add_space(4.0);
-                    // 数值（大号、粗体、主题色）
                     ui.label(RichText::new(value).size(28.0).strong().color(theme.accent));
                 });
             });
@@ -1377,6 +1393,7 @@ impl VaultApp {
     // show_env_stats_card() - 渲染环境分布统计卡片
     // 以水平柱状图展示各个环境（development/staging/production等）的密钥数量
     // total_width: f32 - 卡片总宽度（含左右内边距），左右各16px合计32px，内容区 = total_width - 32
+    // 注意：不再使用 allocate_exact_size 固定高度，让 Frame 根据内容自动撑高
     fn show_env_stats_card(&self, ui: &mut egui::Ui, theme: &ThemeColors, total_width: f32) {
         // 减去左右内边距（16 + 16 = 32），得到实际内容区最小宽度
         let inner_width = (total_width - 32.0).max(40.0);
@@ -1387,7 +1404,8 @@ impl VaultApp {
             .rounding(Rounding::same(8.0))
             .inner_margin(16.0)
             .show(ui, |ui| {
-                ui.set_min_width(inner_width);
+                ui.set_min_width(total_width);
+                ui.set_width(inner_width);
                 ui.label(RichText::new("🌍 环境分布").size(15.0).strong().color(theme.text_primary));
                 ui.add_space(8.0);
 
@@ -1436,9 +1454,10 @@ impl VaultApp {
 
     // show_provider_stats_card() - 渲染提供商分布统计卡片
     // 以水平柱状图展示各个提供商的密钥数量（最多显示前8个）
-    // total_width: f32 - 卡片总宽度（含左右内边距），左右各16px合计32px，内容区 = total_width - 32，为了美观，多减了7px，实际内容区 = total_width - 39
+    // total_width: f32 - 卡片总宽度（含左右内边距），左右各16px合计32px，内容区 = total_width - 32 ，其中-32最好看
+    // 注意：不再使用 allocate_exact_size 固定高度，让 Frame 根据内容自动撑高
     fn show_provider_stats_card(&self, ui: &mut egui::Ui, theme: &ThemeColors, total_width: f32) {
-        let inner_width = (total_width - 39.0).max(40.0);
+        let inner_width = (total_width - 32.0).max(40.0);
 
         egui::Frame::none()
             .fill(theme.bg_card)
@@ -1446,7 +1465,8 @@ impl VaultApp {
             .rounding(Rounding::same(8.0))
             .inner_margin(16.0)
             .show(ui, |ui| {
-                ui.set_min_width(inner_width);
+                ui.set_min_width(total_width);
+                ui.set_width(inner_width);
                 ui.label(RichText::new("🏢 提供商分布").size(15.0).strong().color(theme.text_primary));
                 ui.add_space(8.0);
 
@@ -2303,7 +2323,7 @@ impl VaultApp {
                         // 输入框失去焦点且按下回车时触发生成
                         if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                             if !self.new_group_name.is_empty() {
-                                match self.vault.create_group(self.new_group_name.clone(), None) {
+match self.vault.create_group(self.new_group_name.clone()) {
                                     Ok(_) => {
                                         self.add_notification(Notification::success(format!("分组 '{}' 已创建", self.new_group_name)));
                                         self.new_group_name.clear();  // 清空输入框

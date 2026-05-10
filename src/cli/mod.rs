@@ -144,9 +144,9 @@ pub enum Commands {
         #[arg(short, long)]
         value: Option<String>,
 
-        /// 环境
-        #[arg(short, long, default_value = "development")]
-        environment: String,
+        /// 环境（不指定则自动搜索所有环境）
+        #[arg(short, long)]
+        environment: Option<String>,
     },
 
     /// 审计日志
@@ -245,9 +245,9 @@ pub enum KeyAction {
         /// 密钥名称
         name: String,
 
-        /// 环境
-        #[arg(short, long, default_value = "development")]
-        environment: String,
+        /// 环境（不指定则自动搜索所有环境）
+        #[arg(short, long)]
+        environment: Option<String>,
 
         /// 复制到剪贴板
         #[arg(long)]
@@ -282,9 +282,9 @@ pub enum KeyAction {
         /// 密钥名称
         name: String,
 
-        /// 环境
-        #[arg(short, long, default_value = "development")]
-        environment: String,
+        /// 环境（不指定则自动搜索所有环境）
+        #[arg(short, long)]
+        environment: Option<String>,
 
         /// 新密钥值
         #[arg(short, long)]
@@ -304,9 +304,9 @@ pub enum KeyAction {
         /// 密钥名称
         name: String,
 
-        /// 环境
-        #[arg(short, long, default_value = "development")]
-        environment: String,
+        /// 环境（不指定则自动搜索所有环境）
+        #[arg(short, long)]
+        environment: Option<String>,
 
         /// 跳过确认
         #[arg(long)]
@@ -320,10 +320,6 @@ pub enum GroupAction {
     Create {
         /// 分组名称
         name: String,
-
-        /// 父分组 ID
-        #[arg(short, long)]
-        parent: Option<String>,
     },
 
     /// 列出分组

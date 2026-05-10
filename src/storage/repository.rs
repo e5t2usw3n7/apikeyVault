@@ -109,6 +109,19 @@ impl<'a> Repository<'a> {
         Ok(result)
     }
 
+    /// 根据名称查询密钥（不限制环境，返回第一个匹配）
+    pub fn get_key_by_name_any_env(&self, name: &str) -> Result<Option<KeyEntry>, AppError> {
+        let conn = self.db.conn();
+        let mut stmt = conn
+            .prepare("SELECT * FROM keys WHERE name=?1 ORDER BY created_at DESC LIMIT 1")?;
+
+        let result = stmt
+            .query_row(params![name], |row| self.row_to_key(row))
+            .optional()?;
+
+        Ok(result)
+    }
+
     /// 列出所有密钥
     pub fn list_keys(&self) -> Result<Vec<KeyEntry>, AppError> {
         let conn = self.db.conn();
@@ -244,11 +257,10 @@ impl<'a> Repository<'a> {
     /// 插入分组
     pub fn insert_group(&self, group: &Group) -> Result<(), AppError> {
         self.db.conn().execute(
-            "INSERT INTO groups (id, name, parent_id, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO groups (id, name, description, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 group.id.to_string(),
                 group.name,
-                group.parent_id.map(|id| id.to_string()),
                 group.description,
                 group.created_at.to_rfc3339(),
                 group.updated_at.to_rfc3339(),
@@ -266,15 +278,13 @@ impl<'a> Repository<'a> {
         let rows = stmt
             .query_map([], |row| {
                 let id_str: String = row.get(0)?;
-                let parent_id_str: Option<String> = row.get(2)?;
-                let created_at_str: String = row.get(4)?;
-                let updated_at_str: String = row.get(5)?;
+                let created_at_str: String = row.get(3)?;
+                let updated_at_str: String = row.get(4)?;
 
                 Ok(Group {
                     id: Uuid::parse_str(&id_str).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?,
                     name: row.get(1)?,
-                    parent_id: parent_id_str.as_deref().and_then(|s| Uuid::parse_str(s).ok()),
-                    description: row.get(3)?,
+                    description: row.get(2)?,
                     created_at: chrono::DateTime::parse_from_rfc3339(&created_at_str)
                         .map(|dt| dt.with_timezone(&chrono::Utc))
                         .unwrap_or_else(|_| chrono::Utc::now()),
@@ -289,6 +299,19 @@ impl<'a> Repository<'a> {
             groups.push(row?);
         }
         Ok(groups)
+    }
+
+    /// 重命名分组
+    pub fn rename_group(&self, id: &Uuid, new_name: &str) -> Result<(), AppError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = self.db.conn().execute(
+            "UPDATE groups SET name=?1, updated_at=?2 WHERE id=?3",
+            params![new_name, now, id.to_string()],
+        )?;
+        if affected == 0 {
+            return Err(AppError::GroupNotFound(id.to_string()));
+        }
+        Ok(())
     }
 
     /// 删除分组
@@ -402,7 +425,7 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let repo = Repository::new(&db);
 
-        let group = Group::new("test-group".to_string(), None);
+        let group = Group::new("test-group".to_string());
         repo.insert_group(&group).unwrap();
 
         let groups = repo.list_groups().unwrap();

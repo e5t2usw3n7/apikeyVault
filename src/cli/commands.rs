@@ -1,609 +1,473 @@
-use std::io::{self, Write};
+use std::path::Path;
+use uuid::Uuid;
+use dialoguer::Password;
 
-use crate::cli::*;
+use crate::cli::{Cli, Commands, GroupAction, KeyAction, ImportFormat};
 use crate::config::AppConfig;
-use crate::core::{Environment, KeyType, Vault, VaultState};
-use crate::error::ApiKeyError;
+use crate::core::key::{KeyType, Environment};
+use crate::core::vault::Vault;
+use crate::error::AppError;
 use crate::import_export;
-use crate::shell;
+
+/// 创建已恢复会话的 Vault 实例
+fn create_vault_with_session(config: AppConfig) -> Result<Vault, AppError> {
+    let mut vault = Vault::new(config);
+    let _ = vault.try_restore_session()?;
+    Ok(vault)
+}
+
+/// 创建新的 Vault 实例（不恢复会话）
+fn create_vault(config: AppConfig) -> Result<Vault, AppError> {
+    let vault = Vault::new(config);
+    Ok(vault)
+}
 
 /// 执行 CLI 命令
-pub fn execute(cli: Cli) -> Result<(), ApiKeyError> {
-    // 加载或创建配置
-    let mut config = load_config(&cli)?;
+pub fn execute(cli: Cli) -> Result<(), AppError> {
+    let config = AppConfig::load();
 
-    // 如果指定了 vault_path，覆盖配置
-    if let Some(ref path) = cli.vault_path {
-        config.vault_path = path.clone();
-    }
+    match cli.command {
+        Commands::Init { force } => {
+            let mut vault = create_vault(config)?;
+            if vault.is_initialized() && !force {
+                println!("Vault 已经初始化。使用 --force 强制重新初始化，或使用 'unlock' 命令解锁。");
+                return Ok(());
+            }
 
-    let mut vault = Vault::new(config);
+            if vault.is_initialized() && force {
+                vault.reset()?;
+            }
 
-    // 对于非 Init/Unlock/Lock/Status/Gui 命令，自动尝试从会话恢复
-    // session 由 Vault 核心（vault.rs）自动管理：init/unlock 自动保存，lock 自动清除
-    let needs_unlock = matches!(cli.command,
-        Commands::Init { .. } |
-        Commands::Unlock |
-        Commands::Lock |
-        Commands::Status |
-        Commands::Gui |
-        Commands::Shell { .. }
-    );
+            let password = Password::new().with_prompt("设置主密码").interact()
+                .map_err(|e| AppError::IoError(e.to_string()))?;
+            let confirm = Password::new().with_prompt("确认主密码").interact()
+                .map_err(|e| AppError::IoError(e.to_string()))?;
 
-    if !needs_unlock {
-        let _ = vault.try_restore_session();
-    }
+            if password != confirm {
+                println!("❌ 密码不匹配");
+                return Ok(());
+            }
 
-    let result = match cli.command {
-        Commands::Init { force } => cmd_init(&mut vault, force),
-        Commands::Unlock => cmd_unlock(&mut vault),
-        Commands::Lock => cmd_lock(&mut vault),
-        Commands::Status => cmd_status(&mut vault),
-        Commands::Key { action } => cmd_key(&mut vault, action, &cli.format),
-        Commands::Group { action } => cmd_group(&mut vault, action, &cli.format),
-        Commands::Tag { action } => cmd_tag(&mut vault, action),
-        Commands::Search { query, group, tag } => cmd_search(&mut vault, &query, group, tag, &cli.format),
-        Commands::Import { format, file, environment, .. } => cmd_import(&mut vault, format, &file, &environment),
-        Commands::Export { format, file, environment, .. } => cmd_export(&mut vault, format, &file, environment),
-        Commands::Env { name, var, shell: shell_type } => cmd_env(&mut vault, &name, var, shell_type),
-        Commands::Rotate { name, value, environment } => cmd_rotate(&mut vault, &name, value, &environment),
-        Commands::Audit { limit, action } => cmd_audit(&mut vault, limit, action, &cli.format),
-        Commands::Backup { file, .. } => cmd_backup(&mut vault, &file),
-        Commands::Restore { file } => cmd_restore(&mut vault, &file),
-        Commands::ChangePassword => cmd_change_password(&mut vault),
-        Commands::Shell { action } => cmd_shell(action),
-        Commands::Template { action } => cmd_template(&mut vault, action, &cli.format),
-        Commands::Config { action } => cmd_config(&mut vault, action),
-        Commands::SecurityCheck => cmd_security_check(&cli.format),
-        Commands::Gui => {
-            // GUI 命令由 main.rs 单独处理
-            Ok(())
-        },
-    };
-
-    result
-}
-
-fn load_config(cli: &Cli) -> Result<AppConfig, ApiKeyError> {
-    // cli.config is ignored for now; AppConfig::load uses its own default path
-    let _ = &cli.config;
-    Ok(AppConfig::load())
-}
-
-fn prompt_password(prompt: &str) -> Result<String, ApiKeyError> {
-    dialoguer::Password::new()
-        .with_prompt(prompt)
-        .interact()
-        .map_err(|e| ApiKeyError::IoError(e.to_string()))
-}
-
-fn cmd_init(vault: &mut Vault, force: bool) -> Result<(), ApiKeyError> {
-    if vault.is_initialized() {
-        if !force {
-            println!("Vault 已初始化。使用 --force 重新初始化将清除所有数据。");
-            return Ok(());
+            vault.init(&password)?;
+            println!("✅ Vault 已初始化");
         }
-        vault.reset()?;
-    }
 
-    let password = prompt_password("设置主密码")?;
-    let confirm = prompt_password("确认主密码")?;
+        Commands::Unlock => {
+            let mut vault = create_vault(config)?;
+            if !vault.is_initialized() {
+                println!("❌ Vault 未初始化。请先运行 'init' 命令。");
+                return Ok(());
+            }
 
-    if password != confirm {
-        return Err(ApiKeyError::InvalidInput("密码不匹配".to_string()));
-    }
-
-    if password.len() < 8 {
-        return Err(ApiKeyError::InvalidInput("密码长度至少 8 个字符".to_string()));
-    }
-
-    vault.init(&password)?;
-    // session 由 Vault 核心自动保存，无需额外操作
-    println!("✓ Vault 初始化成功");
-    Ok(())
-}
-
-fn cmd_unlock(vault: &mut Vault) -> Result<(), ApiKeyError> {
-    if !vault.is_initialized() {
-        return Err(ApiKeyError::VaultNotInitialized);
-    }
-
-    let password = prompt_password("输入主密码: ")?;
-    vault.unlock(&password)?;
-    // session 由 Vault 核心自动保存，无需额外操作
-    println!("✓ Vault 已解锁");
-    Ok(())
-}
-
-fn cmd_lock(vault: &mut Vault) -> Result<(), ApiKeyError> {
-    vault.lock();
-    // session 由 Vault 核心自动清除，无需额外操作
-    println!("✓ Vault 已锁定");
-    Ok(())
-}
-
-fn cmd_status(vault: &mut Vault) -> Result<(), ApiKeyError> {
-    let state = vault.state();
-    let status = match state {
-        VaultState::Uninitialized => "未初始化",
-        VaultState::Locked => "已锁定",
-        VaultState::Unlocked => "已解锁",
-    };
-    println!("Vault 状态: {}", status);
-    println!("存储路径: {}", vault.config().vault_path.display());
-    println!("自动锁定: {} 分钟", vault.config().auto_lock_minutes);
-    Ok(())
-}
-
-fn cmd_key(vault: &mut Vault, action: KeyAction, format: &OutputFormat) -> Result<(), ApiKeyError> {
-    match action {
-        KeyAction::Add { name, provider, key_type, value, environment, description, group, tags } => {
-            let env = parse_environment(&environment)?;
-            let kt: KeyType = key_type.into();
-
-            let value = match value {
-                Some(v) => v,
-                None => prompt_password("输入密钥值: ")?,
-            };
-
-            let group_id = group.and_then(|g| uuid::Uuid::parse_str(&g).ok());
-
-            let entry = vault.add_key(name.clone(), provider, kt, &value, env, description, group_id, tags)?;
-            println!("✓ 密钥 '{}' 已添加", entry.name);
-            Ok(())
+            let password = Password::new().with_prompt("输入主密码").interact()
+                .map_err(|e| AppError::IoError(e.to_string()))?;
+            vault.unlock(&password)?;
+            println!("✅ Vault 已解锁（会话已保存，后续命令无需重复输入密码）");
         }
-        KeyAction::Get { name, environment, .. } => {
-            let (entry, value) = vault.get_key(&name, &environment)?;
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::json!({
-                        "name": entry.name,
-                        "provider": entry.provider,
-                        "value": value,
-                        "environment": entry.environment.to_string(),
-                    }));
-                }
-                _ => {
-                    println!("{}", value);
-                }
-            }
-            Ok(())
+
+        Commands::Lock => {
+            let mut vault = create_vault(config)?;
+            vault.lock();
+            println!("🔒 Vault 已锁定");
         }
-        KeyAction::List { environment, group, tag, show_hidden: _ } => {
-            let mut keys = vault.list_keys()?;
 
-            // 过滤
-            if let Some(ref env) = environment {
-                keys.retain(|k| k.environment.to_string() == *env);
-            }
-            if let Some(ref g) = group {
-                if let Ok(gid) = uuid::Uuid::parse_str(g) {
-                    keys.retain(|k| k.group_id == Some(gid));
-                }
-            }
-            if let Some(ref t) = tag {
-                keys.retain(|k| k.tags.contains(t));
-            }
+        Commands::Status => {
+            let mut vault = create_vault_with_session(config.clone())?;
 
-            match format {
-                OutputFormat::Json => {
-                    let items: Vec<_> = keys.iter().map(|k| {
-                        serde_json::json!({
-                            "name": k.name,
-                            "provider": k.provider,
-                            "key_type": format!("{:?}", k.key_type),
-                            "environment": k.environment.to_string(),
-                            "tags": k.tags,
-                            "description": k.description,
-                        })
-                    }).collect();
-                    println!("{}", serde_json::to_string_pretty(&items)?);
-                }
-                _ => {
-                    if keys.is_empty() {
-                        println!("没有找到密钥");
-                    } else {
-                        println!("{:<30} {:<20} {:<15} {:<15} {:<30}", "名称", "提供商", "类型", "环境", "标签");
-                        println!("{}", "-".repeat(110));
-                        for key in &keys {
-                            let tags_str = key.tags.join(", ");
-                            println!("{:<30} {:<20} {:<15} {:<15} {:<30}",
-                                truncate(&key.name, 28),
-                                truncate(&key.provider, 18),
-                                truncate(&format!("{:?}", key.key_type), 13),
-                                key.environment.to_string(),
-                                truncate(&tags_str, 28),
-                            );
+            println!("Vault 状态:");
+            println!("  路径: {}", config.vault_path.display());
+            println!("  状态: {}", match vault.state() {
+                crate::core::vault::VaultState::Uninitialized => "未初始化",
+                crate::core::vault::VaultState::Locked => "已锁定",
+                crate::core::vault::VaultState::Unlocked => "已解锁",
+            });
+
+            if *vault.state() == crate::core::vault::VaultState::Unlocked {
+                let keys = vault.list_keys()?;
+                let groups = vault.list_groups()?;
+                println!("  密钥数量: {}", keys.len());
+                println!("  分组数量: {}", groups.len());
+                println!("  审计日志: {}", config.audit_log_enabled);
+                println!("  自动锁定: {} 分钟", config.auto_lock_minutes);
+            }
+        }
+
+        // ==================== 密钥管理 ====================
+        Commands::Key { action } => {
+            execute_key_action(action, config)?;
+        }
+
+        // ==================== 分组管理 ====================
+        Commands::Group { action } => {
+            execute_group_action(action, config)?;
+        }
+
+        // ==================== 搜索 ====================
+        Commands::Search { query, group, tag } => {
+            let mut vault = create_vault_with_session(config)?;
+            let results = vault.search_keys(&query)?;
+
+            let filtered: Vec<_> = results.into_iter().filter(|key| {
+                if let Some(ref g) = group {
+                    if let Some(gid) = key.group_id {
+                        if gid.to_string() != *g {
+                            return false;
                         }
-                        println!("\n共 {} 个密钥", keys.len());
+                    } else {
+                        return false;
                     }
                 }
-            }
-            Ok(())
-        }
-        KeyAction::Update { name, environment, value, description, tags } => {
-            let entry = vault.update_key(&name, &environment, value.as_deref(), description.as_deref(), tags)?;
-            println!("✓ 密钥 '{}' 已更新", entry.name);
-            Ok(())
-        }
-        KeyAction::Delete { name, environment, force } => {
-            if !force {
-                print!("确定要删除密钥 '{}'? (y/N): ", name);
-                io::stdout().flush().map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-                if input.trim().to_lowercase() != "y" {
-                    println!("已取消");
-                    return Ok(());
-                }
-            }
-            vault.delete_key(&name, &environment)?;
-            println!("✓ 密钥 '{}' 已删除", name);
-            Ok(())
-        }
-    }
-}
-
-fn cmd_group(vault: &mut Vault, action: GroupAction, format: &OutputFormat) -> Result<(), ApiKeyError> {
-    match action {
-        GroupAction::Create { name, parent } => {
-            let parent_id = parent.and_then(|p| uuid::Uuid::parse_str(&p).ok());
-            let group = vault.create_group(name.clone(), parent_id)?;
-            println!("✓ 分组 '{}' 已创建 (ID: {})", group.name, group.id);
-            Ok(())
-        }
-        GroupAction::List => {
-            let groups = vault.list_groups()?;
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&groups)?);
-                }
-                _ => {
-                    if groups.is_empty() {
-                        println!("没有分组");
-                    } else {
-                        println!("{:<38} {:<25} {:<20}", "ID", "名称", "创建时间");
-                        println!("{}", "-".repeat(83));
-                        for g in &groups {
-                            println!("{:<38} {:<25} {:<20}",
-                                g.id, g.name, g.created_at.format("%Y-%m-%d %H:%M"));
-                        }
+                if let Some(ref t) = tag {
+                    if !key.tags.contains(t) {
+                        return false;
                     }
                 }
-            }
-            Ok(())
-        }
-        GroupAction::Delete { id, force } => {
-            if !force {
-                print!("确定要删除分组 {}? (y/N): ", id);
-                io::stdout().flush().map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-                if input.trim().to_lowercase() != "y" {
-                    println!("已取消");
-                    return Ok(());
-                }
-            }
-            let uuid = uuid::Uuid::parse_str(&id)
-                .map_err(|_| ApiKeyError::InvalidInput("无效的分组 ID".to_string()))?;
-            vault.delete_group(&uuid)?;
-            println!("✓ 分组已删除");
-            Ok(())
-        }
-        GroupAction::Rename { .. } => {
-            println!("分组重命名功能暂未实现");
-            Ok(())
-        }
-    }
-}
-
-fn cmd_tag(_vault: &mut Vault, action: TagAction) -> Result<(), ApiKeyError> {
-    match action {
-        TagAction::List => {
-            println!("标签列表功能暂未实现");
-            Ok(())
-        }
-        TagAction::Add { .. } => {
-            println!("标签添加功能暂未实现");
-            Ok(())
-        }
-        TagAction::Remove { .. } => {
-            println!("标签移除功能暂未实现");
-            Ok(())
-        }
-    }
-}
-
-fn cmd_search(vault: &mut Vault, query: &str, group: Option<String>, tag: Option<String>, format: &OutputFormat) -> Result<(), ApiKeyError> {
-    let mut keys = vault.search_keys(query)?;
-
-    if let Some(ref g) = group {
-        if let Ok(gid) = uuid::Uuid::parse_str(g) {
-            keys.retain(|k| k.group_id == Some(gid));
-        }
-    }
-    if let Some(ref t) = tag {
-        keys.retain(|k| k.tags.contains(t));
-    }
-
-    match format {
-        OutputFormat::Json => {
-            let items: Vec<_> = keys.iter().map(|k| {
-                serde_json::json!({
-                    "name": k.name,
-                    "provider": k.provider,
-                    "environment": k.environment.to_string(),
-                })
+                true
             }).collect();
-            println!("{}", serde_json::to_string_pretty(&items)?);
-        }
-        _ => {
-            if keys.is_empty() {
-                println!("没有找到匹配的密钥");
-            } else {
-                println!("找到 {} 个匹配的密钥:", keys.len());
-                for key in &keys {
-                    println!("  {} ({}) - {} [{}]",
-                        key.name, key.provider, key.environment.to_string(),
-                        key.description.as_deref().unwrap_or(""));
-                }
+
+            if filtered.is_empty() {
+                println!("未找到匹配的密钥");
+                return Ok(());
             }
+
+            println!("搜索结果:");
+            println!("{:<30} {:<15} {:<12}", "名称", "提供商", "环境");
+            println!("{}", "-".repeat(60));
+            for key in &filtered {
+                println!("{:<30} {:<15} {:<12}", key.name, key.provider, key.environment);
+            }
+            println!("\n共 {} 个结果", filtered.len());
         }
-    }
-    Ok(())
-}
 
-fn cmd_import(vault: &mut Vault, format: ImportFormat, file: &std::path::Path, environment: &str) -> Result<(), ApiKeyError> {
-    let env = parse_environment(environment)?;
-
-    let records = match format {
-        ImportFormat::Csv => import_export::import_from_csv(file)?,
-        ImportFormat::Json => import_export::import_from_json(file)?,
-        ImportFormat::Env => import_export::import_from_dotenv(file)?,
-    };
-
-    let total = records.len();
-    let imported = vault.import_keys(records, env)?;
-    println!("✓ 导入完成: {}/{} 个密钥已导入", imported, total);
-    Ok(())
-}
-
-fn cmd_export(vault: &mut Vault, format: ImportFormat, file: &std::path::Path, environment: Option<String>) -> Result<(), ApiKeyError> {
-    let mut keys = vault.list_keys()?;
-
-    if let Some(ref env) = environment {
-        keys.retain(|k| k.environment.to_string() == *env);
-    }
-
-    // Convert keys to export tuples
-    let export_records: Vec<(String, String, String, String)> = keys.iter().map(|k| {
-        (k.name.clone(), k.provider.clone(), format!("{:?}", k.key_type), String::new())
-    }).collect();
-
-    match format {
-        ImportFormat::Csv => import_export::export_to_csv(file, &export_records)?,
-        ImportFormat::Json => import_export::export_to_json(file, &export_records)?,
-        ImportFormat::Env => import_export::export_to_dotenv(file, &export_records)?,
-    }
-
-    println!("✓ 导出完成: {} 个密钥已导出到 {}", keys.len(), file.display());
-    Ok(())
-}
-
-fn cmd_env(vault: &mut Vault, name: &str, var: Option<String>, shell_type: Option<ShellType>) -> Result<(), ApiKeyError> {
-    let env = vault.config().default_environment.clone();
-    let (_entry, value) = vault.get_key(name, &env)?;
-    let env_name = var.unwrap_or_else(|| name.to_uppercase().replace('-', "_").replace(' ', "_"));
-
-    let shell = shell_type
-        .map(|s| s.into())
-        .unwrap_or_else(|| shell::ShellType::detect());
-
-    let cmd = shell::generate_export_command(&env_name, &value, shell);
-    println!("{}", cmd);
-    Ok(())
-}
-
-fn cmd_rotate(vault: &mut Vault, name: &str, value: Option<String>, environment: &str) -> Result<(), ApiKeyError> {
-    let new_value = match value {
-        Some(v) => v,
-        None => prompt_password("输入新密钥值: ")?,
-    };
-
-    let entry = vault.rotate_key(name, environment, &new_value)?;
-    println!("✓ 密钥 '{}' 已旋转到版本 {}", entry.name, entry.version);
-    Ok(())
-}
-
-fn cmd_audit(vault: &mut Vault, limit: i64, action: Option<String>, format: &OutputFormat) -> Result<(), ApiKeyError> {
-    let mut logs = vault.get_audit_logs(limit)?;
-
-    if let Some(ref act) = action {
-        logs.retain(|l| format!("{:?}", l.action).to_lowercase().contains(&act.to_lowercase()));
-    }
-
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&logs)?);
+        // ==================== 导入 ====================
+        Commands::Import { format, file, environment, skip_existing: _ } => {
+            let mut vault = create_vault_with_session(config)?;
+            let file_str = file.to_string_lossy().to_string();
+            let file_path = Path::new(&file_str);
+            let records = match format {
+                ImportFormat::Csv => import_export::import_from_csv(file_path)?,
+                ImportFormat::Json => import_export::import_from_json(file_path)?,
+                ImportFormat::Env => import_export::import_from_dotenv(file_path)?,
+            };
+            let env = Environment::from_str(&environment);
+            let count = vault.import_keys(records, env)?;
+            println!("✅ 已导入 {} 个密钥", count);
         }
-        _ => {
+
+        // ==================== 导出 ====================
+        Commands::Export { format, file, environment: _, include_values: _ } => {
+            let mut vault = create_vault_with_session(config)?;
+            let keys = vault.list_keys()?;
+
+            let export_data: Vec<(String, String, String, String)> = keys.iter().map(|k| {
+                (k.name.clone(), k.provider.clone(), k.key_type.to_string(), String::new())
+            }).collect();
+
+            let file_str = file.to_string_lossy().to_string();
+            let file_path = Path::new(&file_str);
+            match format {
+                ImportFormat::Csv => import_export::export_to_csv(file_path, &export_data)?,
+                ImportFormat::Json => import_export::export_to_json(file_path, &export_data)?,
+                ImportFormat::Env => import_export::export_to_dotenv(file_path, &export_data)?,
+            };
+            println!("✅ 已导出 {} 个密钥到 {}", keys.len(), file.display());
+        }
+
+        // ==================== 旋转 ====================
+        Commands::Rotate { name, value, environment } => {
+            let mut vault = create_vault_with_session(config)?;
+            let new_value = if let Some(v) = value {
+                v
+            } else {
+                Password::new().with_prompt("输入新密钥值").interact()
+                    .map_err(|e| AppError::IoError(e.to_string()))?
+            };
+            let entry = if let Some(ref env) = environment {
+                vault.rotate_key(&name, env, &new_value)?
+            } else {
+                vault.rotate_key_any_env(&name, &new_value)?
+            };
+            println!("✅ 密钥已旋转: {} (版本: {})", entry.name, entry.version);
+        }
+
+        // ==================== 审计日志 ====================
+        Commands::Audit { limit, action: _ } => {
+            let mut vault = create_vault_with_session(config)?;
+            let logs = vault.get_audit_logs(limit)?;
+
             if logs.is_empty() {
                 println!("没有审计日志");
+                return Ok(());
+            }
+
+            println!("{:<22} {:<20} {:<12} {}", "时间", "操作", "资源类型", "资源ID");
+            println!("{}", "-".repeat(75));
+            for log in &logs {
+                println!("{:<22} {:<20} {:<12} {}",
+                    log.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                    log.action,
+                    log.resource_type,
+                    log.resource_id.as_deref().unwrap_or("-"));
+            }
+        }
+
+        // ==================== 备份 ====================
+        Commands::Backup { file, encrypt: _ } => {
+            let vault = create_vault_with_session(config)?;
+            vault.backup(&file)?;
+            println!("✅ 备份已创建: {}", file.display());
+        }
+
+        // ==================== 恢复 ====================
+        Commands::Restore { file } => {
+            let mut vault = create_vault(config)?;
+            vault.restore(&file)?;
+            println!("✅ 已从备份恢复。Vault 已锁定，请重新登录。");
+        }
+
+        // ==================== 修改密码 ====================
+        Commands::ChangePassword => {
+            println!("修改密码功能暂未实现");
+        }
+
+        // ==================== 标签管理 ====================
+        Commands::Tag { action: _ } => {
+            println!("标签管理功能暂未实现");
+        }
+
+        // ==================== Shell 集成 ====================
+        Commands::Shell { action: _ } => {
+            println!("Shell 集成功能暂未实现");
+        }
+
+        // ==================== 模板管理 ====================
+        Commands::Template { action: _ } => {
+            println!("模板管理功能暂未实现");
+        }
+
+        // ==================== 配置管理 ====================
+        Commands::Config { action } => {
+            match action {
+                crate::cli::ConfigAction::Show => {
+                    println!("当前配置:");
+                    println!("  vault_path: {}", config.vault_path.display());
+                    println!("  auto_lock_minutes: {}", config.auto_lock_minutes);
+                    println!("  clipboard_clear_seconds: {}", config.clipboard_clear_seconds);
+                    println!("  audit_log_enabled: {}", config.audit_log_enabled);
+                    println!("  theme: {}", config.theme);
+                    println!("  default_environment: {}", config.default_environment);
+                }
+                crate::cli::ConfigAction::Set { key, value } => {
+                    println!("设置配置: {} = {}", key, value);
+                    println!("注意：配置修改需要编辑 config.toml 文件");
+                    println!("当前配置文件路径: {}", AppConfig::config_path().display());
+                }
+                crate::cli::ConfigAction::Reset { .. } => {
+                    let default_config = AppConfig::default();
+                    default_config.save().ok();
+                    println!("✅ 配置已重置为默认值");
+                }
+            }
+        }
+
+        // ==================== 安全检查 ====================
+        Commands::SecurityCheck => {
+            println!("安全检查功能暂未实现");
+        }
+
+        // ==================== 环境变量 ====================
+        Commands::Env { name, var, shell: _ } => {
+            println!("设置环境变量: {} (var: {:?})", name, var);
+            println!("暂未实现");
+        }
+
+        // ==================== GUI ====================
+        Commands::Gui => {
+            // GUI 在 main.rs 中单独处理，这里不会执行到
+            println!("请直接运行不带子命令来启动 GUI");
+        }
+    }
+
+    Ok(())
+}
+
+/// 执行密钥管理子命令
+fn execute_key_action(action: KeyAction, config: AppConfig) -> Result<(), AppError> {
+    match action {
+        KeyAction::Add { name, provider, key_type, value, environment, description, group, tags } => {
+            let mut vault = create_vault_with_session(config)?;
+            let kt = KeyType::from(key_type);
+            let env = Environment::from_str(&environment);
+            let gid = group.and_then(|s| Uuid::parse_str(&s).ok());
+
+            let val = if let Some(v) = value {
+                v
             } else {
-                println!("{:<22} {:<20} {:<15} {:<15}", "时间", "操作", "资源类型", "资源ID");
-                println!("{}", "-".repeat(72));
-                for log in &logs {
-                    let resource_id = log.resource_id.as_deref().unwrap_or("-");
-                    println!("{:<22} {:<20} {:<15} {:<15}",
-                        log.timestamp.format("%Y-%m-%d %H:%M:%S"),
-                        format!("{:?}", log.action),
-                        log.resource_type,
-                        truncate(resource_id, 13),
-                    );
+                Password::new().with_prompt("输入密钥值").interact()
+                    .map_err(|e| AppError::IoError(e.to_string()))?
+            };
+
+            let entry = vault.add_key(name, provider, kt, &val, env, description, gid, tags)?;
+            println!("✅ 密钥已添加: {} (ID: {})", entry.name, entry.id);
+        }
+
+        KeyAction::Get { name, environment, copy, full } => {
+            let mut vault = create_vault_with_session(config)?;
+            let (entry, decrypted) = if let Some(ref env) = environment {
+                vault.get_key(&name, env)?
+            } else {
+                vault.get_key_any_env(&name)?
+            };
+
+            if copy {
+                // 复制到剪贴板
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", &format!("echo {}| clip", decrypted)])
+                        .output();
+                    println!("✅ 已复制到剪贴板");
                 }
-                println!("\n共 {} 条记录", logs.len());
+                return Ok(());
             }
-        }
-    }
-    Ok(())
-}
 
-fn cmd_backup(vault: &Vault, file: &std::path::Path) -> Result<(), ApiKeyError> {
-    vault.backup(file)?;
-    println!("✓ 备份已创建: {}", file.display());
-    Ok(())
-}
-
-fn cmd_restore(vault: &mut Vault, file: &std::path::Path) -> Result<(), ApiKeyError> {
-    print!("确定要从备份恢复? 这将覆盖当前数据 (y/N): ");
-    io::stdout().flush().map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-    if input.trim().to_lowercase() != "y" {
-        println!("已取消");
-        return Ok(());
-    }
-
-    vault.restore(file)?;
-    println!("✓ 从备份恢复成功");
-    Ok(())
-}
-
-fn cmd_change_password(_vault: &mut Vault) -> Result<(), ApiKeyError> {
-    let _old_password = prompt_password("输入当前密码: ")?;
-    let new_password = prompt_password("输入新密码: ")?;
-    let confirm = prompt_password("确认新密码: ")?;
-
-    if new_password != confirm {
-        return Err(ApiKeyError::InvalidInput("密码不匹配".to_string()));
-    }
-
-    if new_password.len() < 8 {
-        return Err(ApiKeyError::InvalidInput("密码长度至少 8 个字符".to_string()));
-    }
-
-    // TODO: 实现密码修改逻辑
-    println!("✓ 密码已修改");
-    Ok(())
-}
-
-fn cmd_shell(action: ShellAction) -> Result<(), ApiKeyError> {
-    match action {
-        ShellAction::Init { shell } => {
-            let shell_type = shell
-                .map(|s| s.into())
-                .unwrap_or_else(|| shell::ShellType::detect());
-            let script = shell::generate_init_script(shell_type);
-            println!("{}", script);
-            Ok(())
-        }
-        ShellAction::Export { name, shell } => {
-            let _shell_type = shell
-                .map(|s| s.into())
-                .unwrap_or_else(|| shell::ShellType::detect());
-            let env_name = shell::key_to_env_var(&name);
-            println!("# 设置环境变量 {}", env_name);
-            println!("# 请先获取密钥值，然后使用 shell export 命令");
-            Ok(())
-        }
-    }
-}
-
-fn cmd_template(_vault: &mut Vault, action: TemplateAction, _format: &OutputFormat) -> Result<(), ApiKeyError> {
-    match action {
-        TemplateAction::List => {
-            let templates = crate::core::template::builtin_templates();
-            println!("可用模板:");
-            for t in templates {
-                println!("  {:<20} {}", t.name, t.description);
+            println!("密钥详情:");
+            println!("  名称: {}", entry.name);
+            println!("  提供商: {}", entry.provider);
+            println!("  类型: {}", entry.key_type);
+            println!("  环境: {}", entry.environment);
+            if full {
+                println!("  值: {}", decrypted);
+            } else {
+                let masked = if decrypted.len() > 8 {
+                    format!("{}...{}", &decrypted[..4], &decrypted[decrypted.len()-4..])
+                } else {
+                    "****".to_string()
+                };
+                println!("  值: {} (使用 --full 显示完整)", masked);
             }
-            Ok(())
-        }
-        TemplateAction::Create { .. } => {
-            println!("模板创建功能暂未实现");
-            Ok(())
-        }
-    }
-}
-
-fn cmd_config(vault: &mut Vault, action: ConfigAction) -> Result<(), ApiKeyError> {
-    match action {
-        ConfigAction::Show => {
-            let config = vault.config();
-            println!("当前配置:");
-            println!("  Vault 路径: {}", config.vault_path.display());
-            println!("  自动锁定: {} 分钟", config.auto_lock_minutes);
-            println!("  剪贴板清除: {} 秒", config.clipboard_clear_seconds);
-            println!("  审计日志: {}", if config.audit_log_enabled { "启用" } else { "禁用" });
-            println!("  默认环境: {}", config.default_environment);
-            println!("  主题: {}", config.theme);
-            Ok(())
-        }
-        ConfigAction::Set { key, value } => {
-            match key.as_str() {
-                "auto_lock_minutes" => {
-                    let mins: u32 = value.parse().map_err(|_| ApiKeyError::InvalidInput("无效的数字".to_string()))?;
-                    vault.config_mut().auto_lock_minutes = mins;
-                }
-                "clipboard_clear_seconds" => {
-                    let secs: u32 = value.parse().map_err(|_| ApiKeyError::InvalidInput("无效的数字".to_string()))?;
-                    vault.config_mut().clipboard_clear_seconds = secs;
-                }
-                "audit_log_enabled" => {
-                    vault.config_mut().audit_log_enabled = value == "true";
-                }
-                "theme" => {
-                    vault.config_mut().theme = value;
-                }
-                _ => {
-                    return Err(ApiKeyError::InvalidInput(format!("未知的配置项: {}", key)));
-                }
+            if let Some(desc) = &entry.description {
+                println!("  描述: {}", desc);
             }
-            println!("✓ 配置已更新");
-            Ok(())
+            println!("  创建时间: {}", entry.created_at.format("%Y-%m-%d %H:%M:%S"));
         }
-        ConfigAction::Reset { force } => {
+
+        KeyAction::List { environment, group, tag, show_hidden: _ } => {
+            let mut vault = create_vault_with_session(config)?;
+            let keys = vault.list_keys()?;
+
+            let filtered: Vec<_> = keys.into_iter().filter(|key| {
+                if let Some(ref env) = environment {
+                    if key.environment.to_string() != *env {
+                        return false;
+                    }
+                }
+                if let Some(ref g) = group {
+                    if let Some(gid) = key.group_id {
+                        if gid.to_string() != *g {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+                if let Some(ref t) = tag {
+                    if !key.tags.contains(t) {
+                        return false;
+                    }
+                }
+                true
+            }).collect();
+
+            if filtered.is_empty() {
+                println!("没有存储的密钥");
+                return Ok(());
+            }
+
+            println!("{:<30} {:<15} {:<12} {:<12}", "名称", "提供商", "类型", "环境");
+            println!("{}", "-".repeat(75));
+            for key in &filtered {
+                println!("{:<30} {:<15} {:<12} {:<12}",
+                    key.name, key.provider, key.key_type, key.environment);
+            }
+            println!("\n共 {} 个密钥", filtered.len());
+        }
+
+        KeyAction::Update { name, environment, value, description, tags } => {
+            let mut vault = create_vault_with_session(config)?;
+            let entry = if let Some(ref env) = environment {
+                vault.update_key(&name, env, value.as_deref(), description.as_deref(), tags)?
+            } else {
+                vault.update_key_any_env(&name, value.as_deref(), description.as_deref(), tags)?
+            };
+            println!("✅ 密钥已更新: {}", entry.name);
+        }
+
+        KeyAction::Delete { name, environment, force } => {
             if !force {
-                print!("确定要重置配置? (y/N): ");
-                io::stdout().flush().map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input).map_err(|e| ApiKeyError::IoError(e.to_string()))?;
-                if input.trim().to_lowercase() != "y" {
-                    println!("已取消");
-                    return Ok(());
-                }
+                println!("确定要删除密钥 '{}' 吗？使用 --force 跳过确认", name);
+                return Ok(());
             }
-            *vault.config_mut() = AppConfig::default();
-            println!("✓ 配置已重置为默认值");
-            Ok(())
+            let mut vault = create_vault_with_session(config)?;
+            if let Some(ref env) = environment {
+                vault.delete_key(&name, env)?;
+            } else {
+                vault.delete_key_any_env(&name)?;
+            }
+            println!("✅ 密钥已删除: {}", name);
         }
     }
-}
 
-fn cmd_security_check(_format: &OutputFormat) -> Result<(), ApiKeyError> {
-    println!("安全检查:");
-    println!("  [✓] 加密算法: AES-256-GCM");
-    println!("  [✓] 密钥派生: Argon2id");
-    println!("  [✓] 内存安全: zeroize");
-    println!("  [✓] 输入验证: 已启用");
-    println!("  [✓] SQL 注入防护: 参数化查询");
-    println!("  [✓] 错误处理: 无敏感信息泄露");
     Ok(())
 }
 
-fn parse_environment(env: &str) -> Result<Environment, ApiKeyError> {
-    match env.to_lowercase().as_str() {
-        "development" | "dev" => Ok(Environment::Development),
-        "staging" | "stage" => Ok(Environment::Staging),
-        "production" | "prod" => Ok(Environment::Production),
-        _ => Ok(Environment::Custom(env.to_string())),
-    }
-}
+/// 执行分组管理子命令
+fn execute_group_action(action: GroupAction, config: AppConfig) -> Result<(), AppError> {
+    match action {
+        GroupAction::Create { name } => {
+            let mut vault = create_vault_with_session(config)?;
+            let group = vault.create_group(name)?;
+            println!("✅ 分组已创建: {} (ID: {})", group.name, group.id);
+        }
 
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
+        GroupAction::List => {
+            let mut vault = create_vault_with_session(config)?;
+            let groups = vault.list_groups()?;
+
+            if groups.is_empty() {
+                println!("没有分组");
+                return Ok(());
+            }
+
+            println!("{:<36} {:<20} {}", "ID", "名称", "描述");
+            println!("{}", "-".repeat(70));
+            for group in &groups {
+                let desc_str = group.description.as_deref().unwrap_or("-");
+                println!("{:<36} {:<20} {}", group.id, group.name, desc_str);
+            }
+            println!("\n共 {} 个分组", groups.len());
+        }
+
+        GroupAction::Rename { id, name } => {
+            let mut vault = create_vault_with_session(config)?;
+            let group_id = Uuid::parse_str(&id)
+                .map_err(|_| AppError::InvalidInput("无效的分组ID格式".to_string()))?;
+            vault.rename_group(&group_id, name.clone())?;
+            println!("✅ 分组已重命名为: {}", name);
+        }
+
+        GroupAction::Delete { id, force } => {
+            if !force {
+                println!("确定要删除分组 '{}' 吗？使用 --force 跳过确认", id);
+                return Ok(());
+            }
+            let mut vault = create_vault_with_session(config)?;
+            let group_id = Uuid::parse_str(&id)
+                .map_err(|_| AppError::InvalidInput("无效的分组ID格式".to_string()))?;
+            vault.delete_group(&group_id)?;
+            println!("✅ 分组已删除: {}", id);
+        }
     }
+
+    Ok(())
 }

@@ -22,7 +22,7 @@
 | Dashboard | 密钥统计、过期提醒、最近操作 |
 | 密钥管理 | 表格展示、排序、过滤、搜索 |
 | 密钥详情 | 隐藏/显示值、复制、版本历史 |
-| 分组管理 | 树形列表、创建/重命名/删除 |
+| 分组管理 | 分组列表、创建/重命名/删除 |
 | 审计日志 | 时间线视图、按类型/时间过滤 |
 | 导入导出 | CSV/JSON/.env、冲突处理策略 |
 | 设置 | 自动锁定、主题切换、密码修改 |
@@ -88,25 +88,25 @@ apikey-vault lock                              # 锁定 Vault
 apikey-vault status                            # 查看 Vault 状态
 
 # === 密钥管理 ===
-apikey-vault key add \
-  --name "openai-api" \
+apikey-vault key add "openai-api" \
   --provider "OpenAI" \
   --key-type api-key \
   --value "sk-xxxxxxxxxxxx" \
-  --env production \
+  -e production \
   --tags "ai,gpt"
 
 apikey-vault key list                          # 列出所有密钥
-apikey-vault key list --env production         # 按环境过滤
+apikey-vault key list --environment production # 按环境过滤
 apikey-vault key get openai-api --copy         # 获取并复制到剪贴板
-apikey-vault key get openai-api --show         # 显示完整密钥值
+apikey-vault key get openai-api --full         # 显示完整密钥值
 apikey-vault key update openai-api --value "sk-new-xxxxx"
 apikey-vault key delete openai-api --force
 
 # === 分组管理 ===
-apikey-vault group create --name "AI Services"
-apikey-vault group list
-apikey-vault group delete <group-id>
+apikey-vault group create "AI Services"                     # 创建分组
+apikey-vault group list                                     # 列出所有分组
+apikey-vault group rename <group-id> "New Name"             # 重命名分组
+apikey-vault group delete <group-id> --force                # 删除分组
 
 # === 搜索 ===
 apikey-vault search "openai"
@@ -115,10 +115,10 @@ apikey-vault search "openai"
 apikey-vault rotate openai-api --value "sk-rotated-xxxxx"
 
 # === 导入导出 ===
-apikey-vault import --format csv --file keys.csv
-apikey-vault import --format json --file keys.json
-apikey-vault import --format dotenv --file .env
-apikey-vault export --format json --file exported_keys.json
+apikey-vault import csv keys.csv
+apikey-vault import json keys.json
+apikey-vault import env .env
+apikey-vault export json exported_keys.json
 
 # === Shell 集成 ===
 apikey-vault env openai-api --shell bash       # 生成 export 命令
@@ -129,12 +129,12 @@ apikey-vault audit                             # 查看审计日志
 apikey-vault audit --limit 50                  # 最近 50 条
 
 # === 备份恢复 ===
-apikey-vault backup --file backup.db
-apikey-vault restore --file backup.db
+apikey-vault backup backup.db
+apikey-vault restore backup.db
 
 # === 设置 ===
 apikey-vault config show                       # 查看当前配置
-apikey-vault config set --key auto_lock_minutes --value 10
+apikey-vault config set auto_lock_minutes 10
 
 # === 安全检查 ===
 apikey-vault security-check                    # 运行安全检查报告

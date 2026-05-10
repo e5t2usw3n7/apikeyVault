@@ -4,11 +4,9 @@
 CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
-    parent_id TEXT,
     description TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (parent_id) REFERENCES groups(id) ON DELETE SET NULL
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 密钥存储表
