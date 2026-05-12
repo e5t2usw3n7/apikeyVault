@@ -92,7 +92,7 @@ enum View {
 
     Login,
 
-    // Dashboard - 仪表板页面，显示统计概览和快捷操作入口
+    // Dashboard - 仪表盘页面，显示统计概览和快捷操作入口
 
     Dashboard,
 
@@ -1219,7 +1219,7 @@ impl VaultApp {
 
             View::Dashboard | View::KeyList => {
 
-                // 仪表板和密钥列表需要所有数据
+                // 仪表盘和密钥列表需要所有数据
 
                 self.refresh_data();
 
@@ -1399,7 +1399,7 @@ impl VaultApp {
 
             let nav_items: Vec<(View, &str, &str)> = vec![
 
-                (View::Dashboard, "📊", "仪表板"),   // 仪表板
+                (View::Dashboard, "📊", "仪表盘"),   // 仪表盘
 
                 (View::KeyList, "🔑", "密钥管理"),   // 密钥管理
 
@@ -1511,11 +1511,11 @@ impl VaultApp {
 
                 let lock_text = if self.sidebar_collapsed {
 
-                    RichText::new("🔓").size(18.0)  // 折叠时只显示图标
+                    RichText::new(" 🔓").size(18.0)  // 折叠时只显示图标
 
                 } else {
 
-                    RichText::new("🔓  锁定 Vault").size(14.0).color(theme.warning)  // 展开时显示文字
+                    RichText::new(" 🔓  锁定 Vault").size(14.0).color(theme.warning)  // 展开时显示文字
 
                 };
 
@@ -1523,7 +1523,7 @@ impl VaultApp {
 
                     .fill(Color32::TRANSPARENT)
 
-                    .min_size(Vec2::new(if self.sidebar_collapsed { 40.0 } else { 176.0 }, 36.0));
+                    .min_size(Vec2::new(if self.sidebar_collapsed { 36.0 } else { 176.0 }, 36.0));
 
                 if ui.add(lock_btn).clicked() {
 
@@ -2383,7 +2383,7 @@ impl VaultApp {
 
                                     self.password_input.clear();
 
-                                    self.navigate_to(View::Dashboard);  // 解锁成功后进入仪表板
+                                    self.navigate_to(View::Dashboard);  // 解锁成功后进入仪表盘
 
                                 }
 
@@ -2515,9 +2515,9 @@ impl VaultApp {
 
 
 
-    // show_dashboard_view() - 渲染仪表板页面
+    // show_dashboard_view() - 渲染仪表盘页面
 
-    // 显示统计概览卡片、环境分布、提供商分布、快捷操作和最近操作记录
+    // 显示统计概览卡片、快捷操作和最近操作记录
 
     fn show_dashboard_view(&mut self, ui: &mut egui::Ui) {
 
@@ -2533,7 +2533,7 @@ impl VaultApp {
 
             ui.horizontal(|ui| {
 
-                ui.label(RichText::new("📊 仪表板").size(22.0).strong().color(theme.text_primary));
+                ui.label(RichText::new("📊 仪表盘").size(22.0).strong().color(theme.text_primary));
 
             });
 
@@ -2584,30 +2584,6 @@ impl VaultApp {
                 ui.add_space(10.0);
 
                 self.show_stat_card(ui, &theme, "📋", "操作记录", &total_logs.to_string(), card_width);
-
-            });
-
-
-
-            ui.add_space(20.0);
-
-
-
-            // ===== 环境统计和提供商统计并排 =====
-
-            let avail_w2 = ui.available_width();
-
-            ui.horizontal(|ui| {
-
-                ui.set_max_width(avail_w2);
-
-                let half_width = (avail_w2 - 110.0) / 2.0;  // 各占一半宽度（留更多余量）
-
-                self.show_env_stats_card(ui, &theme, half_width);      // 环境分布柱状图
-
-                ui.add_space(12.0);
-
-                self.show_provider_stats_card(ui, &theme, half_width); // 提供商分布柱状图
 
             });
 
@@ -3367,7 +3343,7 @@ impl VaultApp {
 
                 // ===== 表头渲染 =====
 
-                let table_w = ui.available_width();
+                let table_w = ui.available_width() - 55.0;
 
                 // 6列宽度比例：名称20%, 提供商14%, 类型12%, 环境12%, 标签24%, 操作18%
 
@@ -5321,7 +5297,7 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
                         egui::Button::new(RichText::new("🔄 刷新").size(13.0))
 
-                            .fill(theme.bg_input)
+                            .fill(theme.accent)
 
                             .min_size(Vec2::new(70.0, 32.0))
 
@@ -5367,13 +5343,13 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
                 let audit_cols = [
 
-                    audit_w * 0.22,  // 时间列（22%）
+                    audit_w * 0.21,  // 时间列（21%）
 
-                    audit_w * 0.22,  // 操作列（22%）
+                    audit_w * 0.21,  // 操作列（21%）
 
                     audit_w * 0.18,  // 资源类型列（18%）
 
-                    audit_w * 0.38,  // 资源ID列（38%）
+                    audit_w * 0.35,  // 资源ID列（35%）
 
                 ];
 
@@ -5381,7 +5357,17 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
                     .fill(theme.bg_secondary)
 
-                    .rounding(Rounding::same(8.0))
+                    .rounding(Rounding {
+
+                        nw: 8.0,
+
+                        ne: 8.0,
+
+                        sw: 0.0,
+
+                        se: 0.0,
+
+                    }) // 上方表头圆角
 
                     .show(ui, |ui| {
 
