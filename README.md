@@ -11,7 +11,6 @@
 - **🔍 格式验证** — 内置密钥模板，自动识别常见 API Key 格式
 - **⏰ 过期提醒** — 密钥过期检测与自动轮换版本管理
 - **📋 导入导出** — 支持 CSV / JSON / .env 格式
-- **🐚 Shell 集成** — 支持 Bash / Zsh / Fish / PowerShell 环境变量注入
 - **📝 审计日志** — 记录所有敏感操作，支持查询和导出
 
 ## 📸 界面预览
@@ -109,20 +108,22 @@ apikey-vault group rename <group-id> "New Name"             # 重命名分组
 apikey-vault group delete <group-id> --force                # 删除分组
 
 # === 搜索 ===
-apikey-vault search "openai"
+apikey-vault search "openai"                            # 搜索密钥
+apikey-vault search "openai" --group <group-id>         # 按分组过滤搜索
+apikey-vault search "openai" --tag "ai"                 # 按标签过滤搜索
 
 # === 密钥轮换 ===
 apikey-vault rotate openai-api --value "sk-rotated-xxxxx"
 
 # === 导入导出 ===
-apikey-vault import csv keys.csv
-apikey-vault import json keys.json
-apikey-vault import env .env
-apikey-vault export json exported_keys.json
-
-# === Shell 集成 ===
-apikey-vault env openai-api --shell bash       # 生成 export 命令
-apikey-vault shell init --shell zsh            # 生成 shell 初始化脚本
+apikey-vault import csv keys.csv                        # 导入 CSV
+apikey-vault import csv keys.csv --skip-existing        # 跳过已存在的密钥
+apikey-vault import json keys.json                      # 导入 JSON
+apikey-vault import env .env                            # 导入 .env
+apikey-vault export csv keys.csv                        # 导出为 CSV
+apikey-vault export json exported_keys.json             # 导出为 JSON
+apikey-vault export env .env                            # 导出为 .env 格式
+apikey-vault export json keys.json --include-values     # 导出时包含密钥值
 
 # === 审计日志 ===
 apikey-vault audit                             # 查看审计日志
@@ -135,9 +136,6 @@ apikey-vault restore backup.db
 # === 设置 ===
 apikey-vault config show                       # 查看当前配置
 apikey-vault config set auto_lock_minutes 10
-
-# === 安全检查 ===
-apikey-vault security-check                    # 运行安全检查报告
 
 # === 启动 GUI ===
 apikey-vault gui
@@ -181,7 +179,7 @@ cargo run -- gui
 apikey-vault/
 ├── Cargo.toml                 # 项目配置和依赖
 ├── CLAUDE.md                  # 开发指导文档
-├── README.md                  # 本文件
+├── README.md                  # 本文档
 ├── migrations/
 │   └── 001_initial.sql        # 数据库初始化 SQL
 └── src/
@@ -201,7 +199,6 @@ apikey-vault/
     │   ├── database.rs        # 数据库连接管理
     │   └── repository.rs      # 数据访问层（CRUD）
     ├── import_export/         # 导入导出（CSV/JSON/.env）
-    ├── shell/                 # Shell 集成
     ├── validation/            # 密钥格式验证
     ├── cli/                   # CLI 命令层
     └── gui/                   # GUI 桌面应用（egui/eframe）
@@ -251,7 +248,7 @@ apikey-vault/
 vault_path = "~/.apikey-vault"       # Vault 数据目录
 auto_lock_minutes = 15               # 自动锁定时间（分钟）
 clipboard_clear_seconds = 30         # 剪贴板清除时间（秒）
-theme = "dark"                       # 主题：dark / light
+theme = "light"                      # 主题：dark / light
 default_environment = "development"  # 默认环境
 audit_log_enabled = true             # 审计日志开关
 max_history = 100                    # 最大历史记录数

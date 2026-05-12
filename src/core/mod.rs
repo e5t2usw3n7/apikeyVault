@@ -5,4 +5,4 @@ pub mod template;
 pub mod vault;
 
 pub use key::{Environment, KeyType};
-pub use vault::{Vault, VaultState};
+pub use vault::{Vault, VaultState, KeyFilter};

@@ -20,11 +20,16 @@ struct JsonExport {
     keys: Vec<JsonKeyRecord>,
 }
 
+/// 从 JSON 文件导入密钥
 pub fn import_json(path: &Path) -> Result<Vec<(String, String, String, String)>, AppError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| AppError::Import(format!("Failed to read JSON file: {}", e)))?;
+    parse_json_content(&content)
+}
 
-    let records: Vec<JsonKeyRecord> = serde_json::from_str(&content)
+/// 从 JSON 字符串内容解析密钥（供 GUI 等非文件场景使用）
+pub fn parse_json_content(content: &str) -> Result<Vec<(String, String, String, String)>, AppError> {
+    let records: Vec<JsonKeyRecord> = serde_json::from_str(content)
         .map_err(|e| AppError::Import(format!("Invalid JSON format: {}", e)))?;
 
     let keys = records.into_iter().map(|r| {
@@ -34,7 +39,8 @@ pub fn import_json(path: &Path) -> Result<Vec<(String, String, String, String)>,
     Ok(keys)
 }
 
-pub fn export_json(path: &Path, keys: &[(String, String, String, String)]) -> Result<(), AppError> {
+/// 将密钥导出为 JSON 字符串
+pub fn export_json_to_string(keys: &[(String, String, String, String)]) -> Result<String, AppError> {
     let records: Vec<JsonKeyRecord> = keys.iter().map(|(name, provider, key_type, value)| {
         JsonKeyRecord {
             name: name.clone(),
@@ -52,8 +58,13 @@ pub fn export_json(path: &Path, keys: &[(String, String, String, String)]) -> Re
         keys: records,
     };
 
-    let content = serde_json::to_string_pretty(&export)
-        .map_err(|e| AppError::Export(format!("Failed to serialize JSON: {}", e)))?;
+    serde_json::to_string_pretty(&export)
+        .map_err(|e| AppError::Export(format!("Failed to serialize JSON: {}", e)))
+}
+
+/// 将密钥导出到 JSON 文件
+pub fn export_json(path: &Path, keys: &[(String, String, String, String)]) -> Result<(), AppError> {
+    let content = export_json_to_string(keys)?;
 
     let mut file = std::fs::File::create(path)
         .map_err(|e| AppError::Export(format!("Failed to create JSON file: {}", e)))?;

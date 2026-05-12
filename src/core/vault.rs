@@ -24,6 +24,13 @@ pub enum VaultState {
     Unlocked,
 }
 
+/// 密钥过滤条件
+#[derive(Debug, Default, Clone)]
+pub struct KeyFilter {
+    pub environment: Option<String>,
+    pub group_id: Option<String>,
+    pub tag: Option<String>,
+}
 /// 用于密码验证的魔术字符串
 const VERIFIER_MAGIC: &[u8] = b"API_KEY_VAULT_VERIFIER_v1";
 
@@ -484,6 +491,45 @@ impl Vault {
         Ok((entry, value))
     }
 
+    // ==================== 密钥过滤 ====================
+
+    /// 列出所有密钥（带过滤）
+    pub fn list_keys_filtered(&mut self, filter: &KeyFilter) -> Result<Vec<KeyEntry>, AppError> {
+        let keys = self.list_keys()?;
+        Ok(Self::apply_filter(keys, filter))
+    }
+
+    /// 搜索密钥（带过滤）
+    pub fn search_keys_filtered(&mut self, query: &str, filter: &KeyFilter) -> Result<Vec<KeyEntry>, AppError> {
+        let keys = self.search_keys(query)?;
+        Ok(Self::apply_filter(keys, filter))
+    }
+
+    /// 对密钥列表应用过滤条件（内部辅助）
+    fn apply_filter(keys: Vec<KeyEntry>, filter: &KeyFilter) -> Vec<KeyEntry> {
+        keys.into_iter().filter(|key| {
+            if let Some(ref env) = filter.environment {
+                if key.environment.to_string() != *env {
+                    return false;
+                }
+            }
+            if let Some(ref gid) = filter.group_id {
+                if let Some(key_gid) = key.group_id {
+                    if key_gid.to_string() != *gid {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            }
+            if let Some(ref tag) = filter.tag {
+                if !key.tags.contains(tag) {
+                    return false;
+                }
+            }
+            true
+        }).collect()
+    }
     /// 列出所有密钥
     pub fn list_keys(&mut self) -> Result<Vec<KeyEntry>, AppError> {
         self.check_auto_lock();

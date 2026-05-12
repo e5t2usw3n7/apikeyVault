@@ -8,6 +8,7 @@ use crate::core::key::{KeyType, Environment};
 use crate::core::vault::Vault;
 use crate::error::AppError;
 use crate::import_export;
+use crate::core::vault::KeyFilter;
 
 /// 创建已恢复会话的 Vault 实例
 fn create_vault_with_session(config: AppConfig) -> Result<Vault, AppError> {
@@ -105,25 +106,12 @@ pub fn execute(cli: Cli) -> Result<(), AppError> {
         // ==================== 搜索 ====================
         Commands::Search { query, group, tag } => {
             let mut vault = create_vault_with_session(config)?;
-            let results = vault.search_keys(&query)?;
-
-            let filtered: Vec<_> = results.into_iter().filter(|key| {
-                if let Some(ref g) = group {
-                    if let Some(gid) = key.group_id {
-                        if gid.to_string() != *g {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                if let Some(ref t) = tag {
-                    if !key.tags.contains(t) {
-                        return false;
-                    }
-                }
-                true
-            }).collect();
+            let filter = KeyFilter {
+                environment: None,
+                group_id: group,
+                tag,
+            };
+            let filtered = vault.search_keys_filtered(&query, &filter)?;
 
             if filtered.is_empty() {
                 println!("未找到匹配的密钥");
@@ -155,13 +143,26 @@ pub fn execute(cli: Cli) -> Result<(), AppError> {
         }
 
         // ==================== 导出 ====================
-        Commands::Export { format, file, environment: _, include_values: _ } => {
+        Commands::Export { format, file, environment, include_values } => {
             let mut vault = create_vault_with_session(config)?;
-            let keys = vault.list_keys()?;
+            let filter = KeyFilter {
+                environment,
+                ..Default::default()
+            };
+            let keys = vault.list_keys_filtered(&filter)?;
 
-            let export_data: Vec<(String, String, String, String)> = keys.iter().map(|k| {
-                (k.name.clone(), k.provider.clone(), k.key_type.to_string(), String::new())
-            }).collect();
+            let export_data: Vec<(String, String, String, String)> = if include_values {
+                keys.iter().map(|k| {
+                    let value = vault.get_key(&k.name, &k.environment.to_string())
+                        .map(|(_, v)| v)
+                        .unwrap_or_default();
+                    (k.name.clone(), k.provider.clone(), k.key_type.to_string(), value)
+                }).collect()
+            } else {
+                keys.iter().map(|k| {
+                    (k.name.clone(), k.provider.clone(), k.key_type.to_string(), String::new())
+                }).collect()
+            };
 
             let file_str = file.to_string_lossy().to_string();
             let file_path = Path::new(&file_str);
@@ -320,13 +321,17 @@ fn execute_key_action(action: KeyAction, config: AppConfig) -> Result<(), AppErr
             };
 
             if copy {
-                // 复制到剪贴板
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("cmd")
-                        .args(["/C", &format!("echo {}| clip", decrypted)])
-                        .output();
-                    println!("✅ 已复制到剪贴板");
+                match arboard::Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        if let Err(e) = clipboard.set_text(&decrypted) {
+                            eprintln!("⚠️ 剪贴板写入失败: {}", e);
+                        } else {
+                            println!("✅ 已复制到剪贴板");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️ 无法访问剪贴板: {}", e);
+                    }
                 }
                 return Ok(());
             }
@@ -354,30 +359,12 @@ fn execute_key_action(action: KeyAction, config: AppConfig) -> Result<(), AppErr
 
         KeyAction::List { environment, group, tag, show_hidden: _ } => {
             let mut vault = create_vault_with_session(config)?;
-            let keys = vault.list_keys()?;
-
-            let filtered: Vec<_> = keys.into_iter().filter(|key| {
-                if let Some(ref env) = environment {
-                    if key.environment.to_string() != *env {
-                        return false;
-                    }
-                }
-                if let Some(ref g) = group {
-                    if let Some(gid) = key.group_id {
-                        if gid.to_string() != *g {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-                if let Some(ref t) = tag {
-                    if !key.tags.contains(t) {
-                        return false;
-                    }
-                }
-                true
-            }).collect();
+            let filter = KeyFilter {
+                environment,
+                group_id: group,
+                tag,
+            };
+            let filtered = vault.list_keys_filtered(&filter)?;
 
             if filtered.is_empty() {
                 println!("没有存储的密钥");

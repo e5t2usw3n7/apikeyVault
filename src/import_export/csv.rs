@@ -1,52 +1,61 @@
 use std::path::Path;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use crate::error::AppError;
 
+/// 从 CSV 文件导入密钥
 pub fn import_csv(path: &Path) -> Result<Vec<(String, String, String, String)>, AppError> {
-    let file = std::fs::File::open(path)
-        .map_err(|e| AppError::Import(format!("Failed to open CSV file: {}", e)))?;
-    let reader = BufReader::new(file);
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| AppError::Import(format!("Failed to read CSV file: {}", e)))?;
+    parse_csv_content(&content)
+}
+
+/// 从 CSV 字符串内容解析密钥（供 GUI 等非文件场景使用）
+pub fn parse_csv_content(content: &str) -> Result<Vec<(String, String, String, String)>, AppError> {
+    let mut rdr = csv::Reader::from_reader(content.as_bytes());
     let mut keys = Vec::new();
 
-    for (i, line) in reader.lines().enumerate() {
-        let line = line.map_err(|e| AppError::Import(format!("Failed to read line: {}", e)))?;
-        if i == 0 && line.to_lowercase().starts_with("name,") {
-            continue; // Skip header
-        }
-        let parts: Vec<&str> = line.splitn(4, ',').collect();
-        if parts.len() >= 2 {
-            let name = parts[0].trim().to_string();
-            let provider = if parts.len() > 1 { parts[1].trim().to_string() } else { "Unknown".to_string() };
-            let key_type = if parts.len() > 2 { parts[2].trim().to_string() } else { "ApiKey".to_string() };
-            let value = if parts.len() > 3 { parts[3].trim().to_string() } else { String::new() };
-            keys.push((name, provider, key_type, value));
+    for result in rdr.records() {
+        let record = result
+            .map_err(|e| AppError::Import(format!("Failed to parse CSV record: {}", e)))?;
+        if record.len() >= 4 {
+            let name = record[0].to_string();
+            let provider = record[1].to_string();
+            let key_type = record[2].to_string();
+            let value = record[3].to_string();
+            if !name.is_empty() && !value.is_empty() {
+                keys.push((name, provider, key_type, value));
+            }
         }
     }
+
     Ok(keys)
 }
 
-pub fn export_csv(path: &Path, keys: &[(String, String, String, String)]) -> Result<(), AppError> {
-    let mut file = std::fs::File::create(path)
-        .map_err(|e| AppError::Export(format!("Failed to create CSV file: {}", e)))?;
-
-    writeln!(file, "name,provider,key_type,value")
-        .map_err(|e| AppError::Export(format!("Failed to write header: {}", e)))?;
+/// 将密钥导出为 CSV 字符串
+pub fn export_csv_to_string(keys: &[(String, String, String, String)]) -> Result<String, AppError> {
+    let mut wtr = csv::Writer::from_writer(vec![]);
+    wtr.write_record(["name", "provider", "key_type", "value"])
+        .map_err(|e| AppError::Export(format!("Failed to write CSV header: {}", e)))?;
 
     for (name, provider, key_type, value) in keys {
-        writeln!(file, "{},{},{},{}",
-            escape_csv(name),
-            escape_csv(provider),
-            escape_csv(key_type),
-            escape_csv(value),
-        ).map_err(|e| AppError::Export(format!("Failed to write record: {}", e)))?;
+        wtr.write_record([name, provider, key_type, value])
+            .map_err(|e| AppError::Export(format!("Failed to write CSV record: {}", e)))?;
     }
-    Ok(())
+
+    wtr.flush()
+        .map_err(|e| AppError::Export(format!("Failed to flush CSV writer: {}", e)))?;
+
+    String::from_utf8(wtr.into_inner()
+        .map_err(|e| AppError::Export(format!("Failed to get CSV output: {}", e)))?)
+        .map_err(|e| AppError::Export(format!("CSV output is not valid UTF-8: {}", e)))
 }
 
-fn escape_csv(s: &str) -> String {
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
+/// 将密钥导出到 CSV 文件
+pub fn export_csv(path: &Path, keys: &[(String, String, String, String)]) -> Result<(), AppError> {
+    let content = export_csv_to_string(keys)?;
+    let mut file = std::fs::File::create(path)
+        .map_err(|e| AppError::Export(format!("Failed to create CSV file: {}", e)))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| AppError::Export(format!("Failed to write CSV file: {}", e)))?;
+    Ok(())
 }
