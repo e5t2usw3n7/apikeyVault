@@ -83,18 +83,18 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
-    /// 根据 ID 查询密钥
-    pub fn get_key_by_id(&self, id: &Uuid) -> Result<Option<KeyEntry>, AppError> {
-        let conn = self.db.conn();
-        let mut stmt = conn
-            .prepare("SELECT * FROM keys WHERE id=?1")?;
-
-        let result = stmt
-            .query_row(params![id.to_string()], |row| self.row_to_key(row))
-            .optional()?;
-
-        Ok(result)
-    }
+    // /// 根据 ID 查询密钥
+    // pub fn get_key_by_id(&self, id: &Uuid) -> Result<Option<KeyEntry>, AppError> {
+    //     let conn = self.db.conn();
+    //     let mut stmt = conn
+    //         .prepare("SELECT * FROM keys WHERE id=?1")?;
+    //
+    //     let result = stmt
+    //         .query_row(params![id.to_string()], |row| self.row_to_key(row))
+    //         .optional()?;
+    //
+    //     Ok(result)
+    // }
 
     /// 根据名称查询密钥
     pub fn get_key_by_name(&self, name: &str, environment: &str) -> Result<Option<KeyEntry>, AppError> {
@@ -314,6 +314,32 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
+    /// 更新分组名称和描述
+    pub fn update_group(&self, id: &Uuid, new_name: &str, new_description: Option<&str>) -> Result<(), AppError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = self.db.conn().execute(
+            "UPDATE groups SET name=?1, description=?2, updated_at=?3 WHERE id=?4",
+            params![new_name, new_description, now, id.to_string()],
+        )?;
+        if affected == 0 {
+            return Err(AppError::GroupNotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// 更新分组描述
+    pub fn update_group_description(&self, id: &Uuid, new_description: Option<&str>) -> Result<(), AppError> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let affected = self.db.conn().execute(
+            "UPDATE groups SET description=?1, updated_at=?2 WHERE id=?3",
+            params![new_description, now, id.to_string()],
+        )?;
+        if affected == 0 {
+            return Err(AppError::GroupNotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
     /// 删除分组
     pub fn delete_group(&self, id: &Uuid) -> Result<(), AppError> {
         let affected = self.db.conn().execute(
@@ -410,10 +436,9 @@ mod tests {
             KeyType::ApiKey,
             vec![1, 2, 3],
         );
-        let id = key.id;
 
         repo.insert_key(&key).unwrap();
-        let retrieved = repo.get_key_by_id(&id).unwrap();
+        let retrieved = repo.get_key_by_name("test-key", "development").unwrap();
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.name, "test-key");

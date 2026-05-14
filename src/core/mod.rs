@@ -4,5 +4,5 @@ pub mod key;
 pub mod template;
 pub mod vault;
 
-pub use key::{Environment, KeyType};
-pub use vault::{Vault, VaultState, KeyFilter};
+// pub use key::{Environment, KeyType};          // unused re-export
+// pub use vault::{Vault, VaultState, KeyFilter}; // unused re-export

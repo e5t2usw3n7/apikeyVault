@@ -63,10 +63,10 @@ impl Vault {
 
     // ==================== 会话持久化管理 ====================
 
-    /// 启用/禁用会话持久化
-    pub fn set_session_enabled(&mut self, enabled: bool) {
-        self.session_enabled = enabled;
-    }
+    // /// 启用/禁用会话持久化
+    // pub fn set_session_enabled(&mut self, enabled: bool) {
+    //     self.session_enabled = enabled;
+    // }
 
     /// 会话文件路径
     fn session_path(&self) -> std::path::PathBuf {
@@ -855,6 +855,48 @@ impl Vault {
         Ok(())
     }
 
+    /// 更新分组（名称和描述）
+    pub fn update_group(&mut self, id: &Uuid, new_name: &str, new_description: Option<String>) -> Result<(), AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        repo.update_group(id, new_name, new_description.as_deref())?;
+
+        self.log_action(
+            AuditAction::GroupUpdated,
+            "group",
+            Some(id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(())
+    }
+
+    /// 更新分组描述
+    pub fn update_group_description(&mut self, id: &Uuid, new_description: Option<String>) -> Result<(), AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        repo.update_group_description(id, new_description.as_deref())?;
+
+        self.log_action(
+            AuditAction::GroupUpdated,
+            "group",
+            Some(id.to_string()),
+            None,
+        )?;
+
+        self.touch();
+        Ok(())
+    }
+
     /// 删除分组
     pub fn delete_group(&mut self, id: &Uuid) -> Result<(), AppError> {
         self.check_auto_lock();
@@ -991,8 +1033,8 @@ impl Vault {
         &mut self.config
     }
 
-    /// 获取 master key 的引用（用于保存会话）
-    pub fn get_master_key(&self) -> Option<&Vec<u8>> {
-        self.master_key.as_ref()
-    }
+    // /// 获取 master key 的引用（用于保存会话）
+    // pub fn get_master_key(&self) -> Option<&Vec<u8>> {
+    //     self.master_key.as_ref()
+    // }
 }

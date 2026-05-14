@@ -11,11 +11,9 @@
 // ==================== 导入区 ====================
 
 // std::path::PathBuf - Rust标准库的文件路径类型，用于指定Vault数据库文件的位置
-
 use std::path::PathBuf;
 
 // chrono::Utc - 时间库，提供UTC时间，用于通知的时间戳和自动锁定判断
-
 use chrono::Utc;
 
 
@@ -114,6 +112,10 @@ enum View {
 
     GroupList,
 
+    // GroupEdit(Option<usize>) - 分组编辑/新建表单页面
+    // None = 新建分组，Some(index) = 编辑现有分组（index为在group_list中的索引）
+    GroupEdit(Option<usize>),
+
     // Settings - 设置页面，包含Vault信息、安全设置、修改密码等
 
     Settings,
@@ -126,9 +128,6 @@ enum View {
 
     ImportExport,
 
-    // Search - 全局搜索页面，搜索所有密钥的名称、提供商、描述等
-
-    Search,
 
 }
 
@@ -395,6 +394,7 @@ struct KeyEditForm {
     description: String,       // 可选描述文本 —— 用户可添加对该密钥的说明
 
     tags: Vec<String>,          // 鏍囩鍒楄〃 -- 姣忎釜鍏冪礌涓€涓爣绛綻r
+    #[allow(dead_code)]
     tags_str: String,          // 标签字符串 -- 逗号分隔，旧版UI使用
 
     group_id_str: String,      // 分组ID字符串 —— UUID格式字符串，空字符串表示无分组
@@ -575,6 +575,62 @@ impl KeyEditForm {
 
 
 
+// GroupEditForm - 分组编辑/新建页面的表单状态结构体
+
+// 与 KeyEditForm 模式一致，在egui即时模式下保持表单数据
+
+#[derive(Debug, Clone)]
+
+struct GroupEditForm {
+
+    name: String,              // 分组名称
+
+    description: String,       // 分组描述（可选）
+
+    name_error: Option<String>,// 名称验证错误信息
+
+}
+
+impl Default for GroupEditForm {
+
+    fn default() -> Self {
+
+        Self {
+
+            name: String::new(),
+
+            description: String::new(),
+
+            name_error: None,
+
+        }
+
+    }
+
+}
+
+impl GroupEditForm {
+
+    // 从已有的 Group 加载表单数据（用于编辑模式）
+
+    fn from_group(group: &Group) -> Self {
+
+        Self {
+
+            name: group.name.clone(),
+
+            description: group.description.clone().unwrap_or_default(),
+
+            name_error: None,
+
+        }
+
+    }
+
+}
+
+
+
 // key_type_to_str() - 将 KeyType 枚举转换为字符串表示
 
 // 用于在下拉框和显示中使用字符串形式的密钥类型
@@ -683,11 +739,6 @@ pub struct VaultApp {
 
 
 
-    // ----- 搜索页状态 -----
-
-    search_query: String,            // 全局搜索页的搜索关键词输入框内容
-
-    search_results: Vec<KeyEntry>,   // 搜索结果列表（调用 vault.search_keys() 后的结果）
 
 
 
@@ -729,9 +780,11 @@ pub struct VaultApp {
 
     // ----- 分组编辑状态 -----
 
-    new_group_name: String,          // 新建分组的名称输入框内容
+    group_edit_form: GroupEditForm,  // 分组编辑表单的所有字段状态
 
-    new_group_error: Option<String>, // 新建分组时的错误信息
+    group_edit_is_new: bool,         // 区分新建/编辑模式：true=新建, false=编辑现有
+
+    group_search_query: String,      // 分组列表页的搜索关键词输入框内容
 
 
 
@@ -933,9 +986,6 @@ impl VaultApp {
 
             audit_logs: Vec::new(),
 
-            search_query: String::new(),
-
-            search_results: Vec::new(),
 
 
 
@@ -975,11 +1025,13 @@ impl VaultApp {
 
 
 
-            // 新建分组输入框为空
+            // 分组编辑状态
 
-            new_group_name: String::new(),
+            group_edit_form: GroupEditForm::default(),
 
-            new_group_error: None,
+            group_edit_is_new: true,
+
+            group_search_query: String::new(),
 
 
 
@@ -1233,6 +1285,14 @@ impl VaultApp {
 
             }
 
+            View::GroupEdit(_) => {
+
+                // 编辑页面需要分组列表
+
+                self.refresh_groups();
+
+            }
+
             View::AuditLog => {
 
                 // 审计日志只需刷新日志列表
@@ -1349,13 +1409,13 @@ impl VaultApp {
 
                     // 折叠时显示 ▶（表示可以展开）
 
-                    RichText::new("▶").size(14.0).color(theme.text_secondary)
+                    RichText::new("   ▶").size(14.0).color(theme.text_secondary)
 
                 } else {
 
                     // 展开时显示 ◀（表示可以折叠）
 
-                    RichText::new("◀").size(14.0).color(theme.text_secondary)
+                    RichText::new("   ◀").size(14.0).color(theme.text_secondary)
 
                 }
 
@@ -1405,7 +1465,6 @@ impl VaultApp {
 
                 (View::GroupList, "📁", "分组管理"), // 分组管理
 
-                (View::Search, "🔍", "搜索"),        // 搜索
 
                 (View::AuditLog, "📋", "审计日志"),  // 审计日志
 
@@ -1511,11 +1570,11 @@ impl VaultApp {
 
                 let lock_text = if self.sidebar_collapsed {
 
-                    RichText::new(" 🔓").size(18.0)  // 折叠时只显示图标
+                    RichText::new(" 🔓").size(18.0).color(theme.warning)  // 折叠时只显示图标
 
                 } else {
 
-                    RichText::new(" 🔓  锁定 Vault").size(14.0).color(theme.warning)  // 展开时显示文字
+                    RichText::new(" 🔓  锁定 Vault").size(18.0).color(theme.warning)  // 展开时显示文字
 
                 };
 
@@ -2299,19 +2358,35 @@ impl VaultApp {
 
                     ui.horizontal(|ui| {
 
-                        ui.add_space((panel_width - password_width) / 2.0 - 10.0);
+                        ui.add_space((panel_width - password_width) / 2.0);
 
                         let text_edit = egui::TextEdit::singleline(&mut self.password_confirm)
 
                             .password(!self.show_password)
 
-                            .desired_width(password_width - 40.0)
+                            .desired_width(password_width)
 
                             .hint_text("确认密码")
 
-                            .font(FontId::new(16.0, FontFamily::Proportional));
+                            .font(FontId::new(20.0, FontFamily::Proportional));
 
                         ui.add(text_edit);
+
+                        let eye_icon = if self.show_password { "🙉" } else { "🙈" };
+
+                        if ui.add(
+
+                            egui::Button::new(RichText::new(eye_icon).size(24.0))
+
+                                .fill(Color32::TRANSPARENT)
+
+                                .frame(false)
+
+                        ).clicked() {
+
+                            self.show_password = !self.show_password;
+
+                        }
 
                     });
 
@@ -2669,7 +2744,7 @@ impl VaultApp {
 
                         ).clicked() {
 
-                            self.navigate_to(View::Search);
+                            self.navigate_to(View::KeyList);
 
                         }
 
@@ -2859,7 +2934,7 @@ impl VaultApp {
 
         // 用分配的矩形创建子 UI，Frame 在其中绘制，不会溢出
 
-        let mut frame_ui = ui.child_ui(rect, egui::Layout::top_down(egui::Align::LEFT), None);
+        let mut frame_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::LEFT)));
 
 
 
@@ -2899,6 +2974,7 @@ impl VaultApp {
 
 
 
+    #[allow(dead_code)]
     // show_env_stats_card() - 渲染环境分布统计卡片
 
     // 以水平柱状图展示各个环境（development/staging/production等）的密钥数量
@@ -3023,6 +3099,7 @@ impl VaultApp {
 
 
 
+    #[allow(dead_code)]
     // show_provider_stats_card() - 渲染提供商分布统计卡片
 
     // 以水平柱状图展示各个提供商的密钥数量（最多显示前8个）
@@ -3261,15 +3338,19 @@ impl VaultApp {
 
             let filtered_keys: Vec<(usize, KeyEntry)> = self.key_list.iter().enumerate().filter(|(_, key)| {
 
-                // 搜索匹配：名称、提供商、描述中包含搜索关键词（不区分大小写）
+                // 搜索匹配：名称、提供商、描述、标签中包含搜索关键词（不区分大小写）
+
+                let query_lower = self.key_search_query.to_lowercase();
 
                 let matches_search = self.key_search_query.is_empty()
 
-                    || key.name.to_lowercase().contains(&self.key_search_query.to_lowercase())
+                    || key.name.to_lowercase().contains(&query_lower)
 
-                    || key.provider.to_lowercase().contains(&self.key_search_query.to_lowercase())
+                    || key.provider.to_lowercase().contains(&query_lower)
 
-                    || key.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&self.key_search_query.to_lowercase()));
+                    || key.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&query_lower))
+
+                    || key.tags.iter().any(|t| t.to_lowercase().contains(&query_lower));
 
 
 
@@ -3341,336 +3422,189 @@ impl VaultApp {
 
             } else {
 
-                // ===== 表头渲染 =====
-
-                let table_w = ui.available_width() - 55.0;
-
-                // 6列宽度比例：名称20%, 提供商14%, 类型12%, 环境12%, 标签24%, 操作18%
-
-                let tbl_col_widths = [
-
-                    table_w * 0.20,
-
-                    table_w * 0.14,
-
-                    table_w * 0.12,
-
-                    table_w * 0.12,
-
-                    table_w * 0.24,
-
-                    table_w * 0.18,
-
-                ];
-
-                // 表头背景（只有上方圆角）
-
-                egui::Frame::none()
-
-                    .fill(theme.bg_secondary)
-
-                    .rounding(Rounding {
-
-                        nw: 8.0,
-
-                        ne: 8.0,
-
-                        sw: 0.0,
-
-                        se: 0.0,
-
-                    })
-
-                    .show(ui, |ui| {
-
-                        ui.horizontal(|ui| {
-
-                            ui.add_space(8.0);
-
-                            let headers = ["名称", "提供商", "类型", "环境", "标签", "操作"];
-
-
-
-                            for (i, header) in headers.iter().enumerate() {
-
-                                // 表头项是可点击的排序按钮
-
-                                let resp = ui.add_sized(
-
-                                    Vec2::new(tbl_col_widths[i], 28.0),
-
-                                    egui::Button::new(
-
-                                        RichText::new(*header).size(12.0).strong().color(theme.text_secondary)
-
-                                    ).fill(Color32::TRANSPARENT).frame(false),
-
-                                );
-
-                                if resp.clicked() {
-
-                                    // 点击表头切换排序：点击同一列切换升降序，点击不同列切换为该列升序
-
-                                    if self.key_sort_column == i {
-
-                                        self.key_sort_ascending = !self.key_sort_ascending;
-
-                                    } else {
-
-                                        self.key_sort_column = i;
-
-                                        self.key_sort_ascending = true;
-
-                                    }
-
-                                }
-
-                            }
-
-                        });
-
-                    });
-
-
-
-                // ===== 表格数据行（可滚动）=====
-
+                // ===== 表格渲染（表头+数据行在同一ScrollArea内，确保对齐）=====
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
 
-                    // 遍历过滤后的密钥列表
+                    // 列宽在ScrollArea内部计算，确保与数据行共享同一内容区宽度
+                    let table_w = ui.available_width() - 55.0;
+                    // 6列宽度比例：名称20%, 提供商14%, 类型12%, 环境12%, 标签24%, 操作18%
+                    let tbl_col_widths = [
+                        table_w * 0.20,
+                        table_w * 0.14,
+                        table_w * 0.12,
+                        table_w * 0.12,
+                        table_w * 0.24,
+                        table_w * 0.18,
+                    ];
 
+                    // 表头背景（上方圆角，与审计日志风格一致）
+                    egui::Frame::none()
+                        .fill(theme.bg_secondary)
+                        .rounding(Rounding {
+                            nw: 8.0,
+                            ne: 8.0,
+                            sw: 0.0,
+                            se: 0.0,
+                        })
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(8.0);
+                                let headers = ["名称", "提供商", "类型", "环境", "标签", "操作"];
+
+                                for (i, header) in headers.iter().enumerate() {
+                                    // 表头项是可点击的排序按钮
+                                    let resp = ui.add_sized(
+                                        Vec2::new(tbl_col_widths[i], 32.0),
+                                        egui::Button::new(
+                                            RichText::new(*header).size(12.0).strong().color(theme.text_secondary)
+                                        ).fill(Color32::TRANSPARENT).frame(false),
+                                    );
+                                    if resp.clicked() {
+                                        // 点击表头切换排序：点击同一列切换升降序，点击不同列切换为该列升序
+                                        if self.key_sort_column == i {
+                                            self.key_sort_ascending = !self.key_sort_ascending;
+                                        } else {
+                                            self.key_sort_column = i;
+                                            self.key_sort_ascending = true;
+                                        }
+                                    }
+                                }
+                            });
+                        });
+
+                    // 数据行（斑马纹，与审计日志风格一致）
                     for (list_idx, (orig_idx, key)) in filtered_keys.iter().enumerate() {
-
                         // 交替行背景色（斑马纹）
-
                         let row_bg = if list_idx % 2 == 0 { theme.bg_card } else { theme.bg_secondary };
 
-
-
                         egui::Frame::none()
-
                             .fill(row_bg)
-
                             .show(ui, |ui| {
-
                                 ui.horizontal(|ui| {
-
                                     ui.add_space(8.0);
 
-
-
                                     // ------ 名称列（蓝色链接样式，可点击进入详情）------
-
                                     if ui.add_sized(
-
                                         Vec2::new(tbl_col_widths[0], 32.0),
-
                                         egui::Button::new(
-
                                             RichText::new(&key.name).size(13.0).color(theme.accent)
-
                                         ).fill(Color32::TRANSPARENT).frame(false),
-
                                     ).clicked() {
-
                                         let idx = *orig_idx;
-
                                         self.decrypted_value = None;
-
                                         self.show_decrypted_value = false;
-
                                         self.selected_key_index = Some(idx);
-
                                         self.current_view = View::KeyDetail(idx);
-
                                     }
 
-
-
                                     // ------ 提供商列 ------
-
                                     ui.add_sized(
-
                                         Vec2::new(tbl_col_widths[1], 32.0),
-
                                         egui::Label::new(RichText::new(&key.provider).size(13.0).color(theme.text_primary)),
-
                                     );
-
-
 
                                     // ------ 类型列 ------
-
                                     ui.add_sized(
-
                                         Vec2::new(tbl_col_widths[2], 32.0),
-
                                         egui::Label::new(RichText::new(key.key_type.to_string()).size(13.0).color(theme.text_secondary)),
-
                                     );
-
-
 
                                     // ------ 环境列（带颜色标记）------
-
                                     let env_color = match key.environment.to_string().as_str() {
-
                                         "production" => theme.error,               // 生产环境=红色
-
                                         "staging" => theme.warning,                 // 预发布环境=黄色
-
                                         "development" => theme.success,             // 开发环境=绿色
-
                                         _ => theme.text_secondary,
-
                                     };
-
                                     ui.add_sized(
-
                                         Vec2::new(tbl_col_widths[3], 32.0),
-
                                         egui::Label::new(
-
-                                            RichText::new(key.environment.to_string()).size(12.0).color(env_color).family(FontFamily::Monospace)
-
+                                            RichText::new(key.environment.to_string()).size(13.0).color(env_color).family(FontFamily::Monospace)
                                         ),
-
                                     );
-
-
 
                                     // ------ 标签列 ------
-
                                     let tags_str = if key.tags.is_empty() {
-
                                         "-".to_string()  // 无标签显示"-"
-
                                     } else {
-
                                         key.tags.join(", ")  // 多标签用逗号连接
-
                                     };
-
                                     ui.add_sized(
-
                                         Vec2::new(tbl_col_widths[4], 32.0),
-
-                                        egui::Label::new(RichText::new(tags_str).size(12.0).color(theme.text_dim)),
-
+                                        egui::Label::new(RichText::new(tags_str).size(13.0).color(theme.text_dim)).truncate(),
                                     );
 
+                                    // ------ 操作按钮列（居中显示）------
+                                    let action_btn_size = Vec2::new(24.0, 24.0);
+                                    let total_btn_width = action_btn_size.x * 3.0 + ui.spacing().item_spacing.x * 2.0;
+                                    // 先分配整列区域，获取精确 rect
+                                    let (col_rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(tbl_col_widths[5], 32.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    // 在分配的区域内居中放置按钮组
+                                    let btn_group_rect = egui::Rect::from_center_size(
+                                        col_rect.center(),
+                                        Vec2::new(total_btn_width, action_btn_size.y),
+                                    );
+                                    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(btn_group_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
 
-
-                                    // ------ 操作按钮列 ------
-
-                                    ui.horizontal(|ui| {
-
-                                        // 复制按钮
-
-                                        if ui.add(
-
-                                            egui::Button::new(RichText::new("📋").size(14.0))
-
-                                                .fill(Color32::TRANSPARENT)
-
-                                                .frame(false)
-
-                                        ).on_hover_text("复制密钥值").clicked() {
-
-                                            match self.vault.get_key(&key.name, &key.environment.to_string()) {
-
-                                                Ok((_, value)) => self.copy_to_clipboard(&value),
-
-                                                Err(e) => self.add_notification(Notification::error(format!("获取密钥失败: {}", e))),
-
-                                            }
-
+                                    // 复制按钮
+                                    if child_ui.add(
+                                        egui::Button::new(RichText::new("📋").size(13.0))
+                                            .fill(Color32::TRANSPARENT)
+                                            .frame(false)
+                                            .min_size(action_btn_size)
+                                    ).on_hover_text("复制密钥值").clicked() {
+                                        match self.vault.get_key(&key.name, &key.environment.to_string()) {
+                                            Ok((_, value)) => self.copy_to_clipboard(&value),
+                                            Err(e) => self.add_notification(Notification::error(format!("获取密钥失败: {}", e))),
                                         }
+                                    }
 
+                                    // 编辑按钮
+                                    if child_ui.add(
+                                        egui::Button::new(RichText::new("✏").size(13.0))
+                                            .fill(Color32::TRANSPARENT)
+                                            .frame(false)
+                                            .min_size(action_btn_size)
+                                    ).on_hover_text("编辑").clicked() {
+                                        let idx = *orig_idx;
+                                        self.edit_form = KeyEditForm::from_entry(key, &self.vault);
+                                        self.edit_is_new = false;
+                                        self.navigate_to(View::KeyEdit(Some(idx)));
+                                    }
 
-
-                                        // 编辑按钮
-
-                                        if ui.add(
-
-                                            egui::Button::new(RichText::new("✏").size(14.0))
-
-                                                .fill(Color32::TRANSPARENT)
-
-                                                .frame(false)
-
-                                        ).on_hover_text("编辑").clicked() {
-
-                                            let idx = *orig_idx;
-
-                                            self.edit_form = KeyEditForm::from_entry(key, &self.vault);
-
-                                            self.edit_is_new = false;
-
-                                            self.navigate_to(View::KeyEdit(Some(idx)));
-
-                                        }
-
-
-
-                                        // 删除按钮（需要确认）
-
-                                        if ui.add(
-
-                                            egui::Button::new(RichText::new("🗑").size(14.0))
-
-                                                .fill(Color32::TRANSPARENT)
-
-                                                .frame(false)
-
-                                        ).on_hover_text("删除").clicked() {
-
-                                            self.confirm_dialog = Some(ConfirmDialog {
-
-                                                title: "删除密钥".to_string(),
-
-                                                message: format!("确定要删除密钥 '{}' 吗？此操作不可恢复。", key.name),
-
-                                                on_confirm_action: ConfirmAction::DeleteKey(
-
-                                                    key.name.clone(),
-
-                                                    key.environment.to_string(),
-
-                                                ),
-
-                                            });
-
-                                        }
-
-                                    });
-
+                                    // 删除按钮（需要确认）
+                                    if child_ui.add(
+                                        egui::Button::new(RichText::new("🗑").size(13.0))
+                                            .fill(Color32::TRANSPARENT)
+                                            .frame(false)
+                                            .min_size(action_btn_size)
+                                    ).on_hover_text("删除").clicked() {
+                                        self.confirm_dialog = Some(ConfirmDialog {
+                                            title: "删除密钥".to_string(),
+                                            message: format!("确定要删除密钥 '{}' 吗？此操作不可恢复。", key.name),
+                                            on_confirm_action: ConfirmAction::DeleteKey(
+                                                key.name.clone(),
+                                                key.environment.to_string(),
+                                            ),
+                                        });
+                                    }
                                 });
-
                             });
 
-
-
                         // ===== 行间分隔线 =====
-
                         ui.painter().line_segment(
-
                             [
-
                                 egui::pos2(ui.cursor().left() + 8.0, ui.cursor().top()),
-
                                 egui::pos2(ui.cursor().right() - 8.0, ui.cursor().top()),
-
                             ],
-
                             Stroke::new(0.5, theme.border),  // 0.5px细线
-
                         );
-
                     }
-
                 });
 
             }
@@ -4127,35 +4061,47 @@ impl VaultApp {
 
         let title = if self.edit_is_new { "➕ 添加密钥" } else { "✏ 编辑密钥" };
 
+        // 居中：计算左右和上下留白
+        let available_w = ui.available_width();
+        let available_h = ui.available_height();
+        // 响应式表单尺寸：根据窗口大小动态调整
+        let max_form_width = (available_w * 0.55).max(420.0).min(2400.0);
+        let form_estimated_height = (available_h * 0.75).max(400.0).min(3900.0);
+        // 响应式留白
+        let top_pad = ((available_h - form_estimated_height) / 2.5).max(20.0);//除以2.5是为了补偿占位，确保视觉上真正居中
+        let left_pad = ((available_w - max_form_width) / 1.65).max(20.0); //除以1.65是为了补偿占位，确保视觉上真正居中
 
+        // ===== 返回按钮（右侧面板左上角） =====
 
-        ui.vertical(|ui| {
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            if ui.add(
 
-            // ===== 返回按钮和标题 =====
+                egui::Button::new(RichText::new("← 返回").size(13.0).color(theme.text_secondary))
 
-            ui.horizontal(|ui| {
+                    .fill(theme.bg_input)
 
-                if ui.add(
+                    .min_size(Vec2::new(70.0, 30.0))
 
-                    egui::Button::new(RichText::new("← 返回").size(13.0).color(theme.text_secondary))
+                    .rounding(Rounding::same(6.0))
 
-                        .fill(theme.bg_input)
+            ).clicked() {
 
-                        .min_size(Vec2::new(70.0, 30.0))
+                self.navigate_to(View::KeyList);
 
-                        .rounding(Rounding::same(6.0))
+            }
+        });
 
-                ).clicked() {
+        ui.add_space(top_pad);
+        ui.horizontal(|ui| {
+            ui.add_space(left_pad);
+            ui.vertical(|ui| {
+                ui.set_max_width(max_form_width);
 
-                    self.navigate_to(View::KeyList);
+            // ===== 标题 =====
 
-                }
-
-                ui.add_space(8.0);
-
-                ui.label(RichText::new(title).size(22.0).strong().color(theme.text_primary));
-
-            });
+            ui.label(RichText::new(title).size(22.0).strong().color(theme.text_primary));
 
 
 
@@ -4485,9 +4431,7 @@ impl VaultApp {
 
                     ui.add_space(24.0);
 
-
-
-                    // ===== 底部按钮行：保存 + 取消 =====
+                    // ===== 底部按钮行：保存（左） + 取消（右下角） =====
 
                     ui.horizontal(|ui| {
 
@@ -4509,35 +4453,35 @@ impl VaultApp {
 
                         }
 
+                        // 取消按钮右对齐
 
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                        ui.add_space(16.0);
+                            if ui.add(
 
+                                egui::Button::new(RichText::new("取消").size(14.0).color(theme.text_secondary))
 
+                                    .fill(theme.bg_input)
 
-                        // "取消"按钮
+                                    .min_size(Vec2::new(80.0, 38.0))
 
-                        if ui.add(
+                                    .rounding(Rounding::same(6.0))
 
-                            egui::Button::new(RichText::new("取消").size(14.0).color(theme.text_secondary))
+                            ).clicked() {
 
-                                .fill(theme.bg_input)
+                                self.navigate_to(View::KeyList);
 
-                                .min_size(Vec2::new(80.0, 38.0))
+                            }
 
-                                .rounding(Rounding::same(6.0))
-
-                        ).clicked() {
-
-                            self.navigate_to(View::KeyList);
-
-                        }
+                        });
 
                     });
 
-                });
+                }); // egui::Frame
 
-        });
+            }); // ui.vertical
+
+        }); // ui.horizontal (居中)
 
     }
 
@@ -4715,7 +4659,7 @@ impl VaultApp {
 
                     self.refresh_keys();
 
-                    self.navigate_to(View::KeyList);
+                    // 编辑模式：保存后不退出，保留提示，只有点击返回/取消才退出
 
                 }
 
@@ -4749,95 +4693,55 @@ impl VaultApp {
 
         ui.vertical(|ui| {
 
-            // ===== 标题行：标题 + 新建分组输入区域 =====
+            // ===== 标题行：标题 + 搜索框 + 新建按钮 =====
 
             ui.horizontal(|ui| {
 
                 ui.label(RichText::new("📁 分组管理").size(22.0).strong().color(theme.text_primary));
 
-                // 右对齐：新建分组控件
+                ui.add_space(16.0);
+
+                // ===== 搜索输入框（自适应宽度）=====
+
+                let available_w = ui.available_width();
+
+                let search_w = (available_w * 0.35).max(120.0);
+
+                let search_edit = egui::TextEdit::singleline(&mut self.group_search_query)
+
+                    .desired_width(search_w)
+
+                    .hint_text("搜索分组...");
+
+                ui.add(search_edit);
+
+                // ===== "新建分组"按钮（右对齐）=====
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
 
-                    ui.horizontal(|ui| {
+                    if ui.add(
 
-                        // "新建分组"按钮
+                        egui::Button::new(RichText::new("➕ 新建分组").size(13.0).color(Color32::WHITE))
 
-                        if ui.add(
+                            .fill(theme.accent)
 
-                            egui::Button::new(RichText::new("➕ 新建分组").size(13.0).color(Color32::WHITE))
+                            .min_size(Vec2::new(110.0, 34.0))
 
-                                .fill(theme.accent)
+                            .rounding(Rounding::same(6.0))
 
-                                .min_size(Vec2::new(110.0, 34.0))
+                    ).clicked() {
 
-                                .rounding(Rounding::same(6.0))
+                        self.group_edit_form = GroupEditForm::default();
 
-                        ).clicked() {
+                        self.group_edit_is_new = true;
 
-                            self.new_group_name.clear();
+                        self.navigate_to(View::GroupEdit(None));
 
-                            self.new_group_error = None;
-
-                        }
-
-
-
-                        // 分组名称输入框（始终可见）
-
-                        let group_edit = egui::TextEdit::singleline(&mut self.new_group_name)
-
-                            .desired_width(200.0)
-
-                            .hint_text("分组名称");
-
-                        let resp = ui.add(group_edit);
-
-                        // 输入框失去焦点且按下回车时触发生成
-
-                        if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-
-                            if !self.new_group_name.is_empty() {
-
-match self.vault.create_group(self.new_group_name.clone()) {
-
-                                    Ok(_) => {
-
-                                        self.add_notification(Notification::success(format!("分组 '{}' 已创建", self.new_group_name)));
-
-                                        self.new_group_name.clear();  // 清空输入框
-
-                                        self.refresh_groups();
-
-                                    }
-
-                                    Err(e) => {
-
-                                        self.new_group_error = Some(format!("{}", e));
-
-                                    }
-
-                                }
-
-                            }
-
-                        }
-
-                    });
+                    }
 
                 });
 
             });
-
-
-
-            // 显示新建分组错误
-
-            if let Some(ref err) = self.new_group_error {
-
-                ui.label(RichText::new(err).size(12.0).color(theme.error));
-
-            }
 
 
 
@@ -4863,7 +4767,7 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
                     ui.add_space(4.0);
 
-                    ui.label(RichText::new("在上方输入分组名称并按回车创建").size(13.0).color(theme.text_dim));
+                    ui.label(RichText::new("点击上方'新建分组'按钮创建").size(13.0).color(theme.text_dim));
 
                 });
 
@@ -4883,11 +4787,25 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
                 }
 
+                // 过滤分组列表：名称或描述中包含搜索关键词（不区分大小写）
+
+                let filtered_indices: Vec<usize> = self.group_list.iter().enumerate().filter(|(_, group)| {
+
+                    self.group_search_query.is_empty()
+
+                        || group.name.to_lowercase().contains(&self.group_search_query.to_lowercase())
+
+                        || group.description.as_ref().map_or(false, |d| d.to_lowercase().contains(&self.group_search_query.to_lowercase()))
+
+                }).map(|(idx, _)| idx).collect();
+
 
 
                 // 遍历并渲染每个分组卡片
 
-                for group in &self.group_list {
+                for idx in &filtered_indices {
+
+                    let group = self.group_list[*idx].clone();
 
                     egui::Frame::none()
 
@@ -4927,9 +4845,11 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
 
 
-                                // 右对齐：删除按钮
+                                // 右对齐：编辑和删除按钮
 
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+
+                                    // 删除按钮
 
                                     if ui.add(
 
@@ -4938,8 +4858,6 @@ match self.vault.create_group(self.new_group_name.clone()) {
                                             .fill(Color32::TRANSPARENT).frame(false)
 
                                     ).on_hover_text("删除分组").clicked() {
-
-                                        // 弹出确认对话框
 
                                         self.confirm_dialog = Some(ConfirmDialog {
 
@@ -4950,6 +4868,24 @@ match self.vault.create_group(self.new_group_name.clone()) {
                                             on_confirm_action: ConfirmAction::DeleteGroup(group.id.to_string()),
 
                                         });
+
+                                    }
+
+                                    // 编辑按钮
+
+                                    if ui.add(
+
+                                        egui::Button::new(RichText::new("✏").size(14.0))
+
+                                            .fill(Color32::TRANSPARENT).frame(false)
+
+                                    ).on_hover_text("编辑分组").clicked() {
+
+                                        self.group_edit_form = GroupEditForm::from_group(&group);
+
+                                        self.group_edit_is_new = false;
+
+                                        self.navigate_to(View::GroupEdit(Some(*idx)));
 
                                     }
 
@@ -5005,265 +4941,262 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
 
 
-    // ==================== 搜索视图 ====================
+    // show_group_edit_view() - 渲染分组编辑/新建表单页面
 
+    // 参照 show_key_edit_view() 的布局：返回按钮 + 居中表单卡片 + 名称/描述字段 + 保存按钮
 
-
-    // show_search_view() - 渲染全局搜索页面
-
-    // 支持按名称、提供商、描述搜索，显示搜索结果和复制操作
-
-    fn show_search_view(&mut self, ui: &mut egui::Ui) {
+    fn show_group_edit_view(&mut self, ui: &mut egui::Ui, index: Option<usize>) {
 
         let theme = if self.settings_theme == "dark" { dark_theme() } else { light_theme() };
 
+        let title = if self.group_edit_is_new { "➕ 新建分组" } else { "✏ 编辑分组" };
 
+        // 居中布局
 
-        ui.vertical(|ui| {
+        let available_w = ui.available_width();
 
-            ui.label(RichText::new("🔍 搜索密钥").size(22.0).strong().color(theme.text_primary));
+        let available_h = ui.available_height();
 
-            ui.add_space(16.0);
+        let max_form_width = (available_w * 0.55).max(420.0).min(2400.0);
 
+        let form_estimated_height = (available_h * 0.5).max(300.0).min(2000.0);
 
+        let top_pad = ((available_h - form_estimated_height) / 2.5).max(20.0);
 
-            // ===== 搜索输入框 =====
+        let left_pad = ((available_w - max_form_width) / 1.65).max(20.0);
 
-            ui.horizontal(|ui| {
+        // ===== 返回按钮 =====
 
-                let search_w = (ui.available_width() - 100.0).max(200.0);
+        ui.add_space(10.0);
 
-                let search_edit = egui::TextEdit::singleline(&mut self.search_query)
+        ui.horizontal(|ui| {
 
-                    .desired_width(search_w)
+            ui.add_space(10.0);
 
-                    .hint_text("输入搜索关键词（名称、提供商、描述）...");
+            if ui.add(
 
-                let resp = ui.add(search_edit);
+                egui::Button::new(RichText::new("← 返回").size(13.0).color(theme.text_secondary))
 
+                    .fill(theme.bg_input)
 
+                    .min_size(Vec2::new(70.0, 30.0))
 
-                // "搜索"按钮
+                    .rounding(Rounding::same(6.0))
 
-                if ui.add(
+            ).clicked() {
 
-                    egui::Button::new(RichText::new("🔍 搜索").size(13.0).color(Color32::WHITE))
-
-                        .fill(theme.accent)
-
-                        .min_size(Vec2::new(80.0, 32.0))
-
-                        .rounding(Rounding::same(6.0))
-
-                ).clicked() || (resp.changed()) {
-
-                    // 触发搜索（点击按钮或输入内容变化时）
-
-                    if !self.search_query.is_empty() {
-
-                        match self.vault.search_keys(&self.search_query) {
-
-                            Ok(results) => {
-
-                                self.search_results = results;
-
-                            }
-
-                            Err(e) => {
-
-                                self.add_notification(Notification::error(format!("搜索失败: {}", e)));
-
-                            }
-
-                        }
-
-                    } else {
-
-                        self.search_results.clear();
-
-                    }
-
-                }
-
-            });
-
-
-
-            ui.add_space(16.0);
-
-
-
-            // ===== 搜索结果 =====
-
-            if self.search_query.is_empty() {
-
-                // 未输入搜索词时的提示
-
-                ui.add_space(40.0);
-
-                ui.vertical_centered(|ui| {
-
-                    ui.label(RichText::new("🔍").size(48.0).color(theme.text_dim));
-
-                    ui.add_space(8.0);
-
-                    ui.label(RichText::new("输入关键词开始搜索").size(16.0).color(theme.text_dim));
-
-                });
-
-            } else if self.search_results.is_empty() {
-
-                // 无匹配结果
-
-                ui.add_space(40.0);
-
-                ui.vertical_centered(|ui| {
-
-                    ui.label(RichText::new("😕").size(48.0).color(theme.text_dim));
-
-                    ui.add_space(8.0);
-
-                    ui.label(RichText::new(format!("没有找到匹配 '{}' 的密钥", self.search_query)).size(14.0).color(theme.text_dim));
-
-                });
-
-            } else {
-
-                // 显示结果数量
-
-                ui.label(
-
-                    RichText::new(format!("找到 {} 个结果", self.search_results.len()))
-
-                        .size(13.0)
-
-                        .color(theme.text_secondary),
-
-                );
-
-                ui.add_space(8.0);
-
-
-
-                // 克隆搜索结果以避免借位冲突（用于滚动区域）
-
-                let search_results_clone: Vec<KeyEntry> = self.search_results.clone();
-
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false; 2])
-                    .show(ui, |ui| {
-
-                    for (_i, key) in search_results_clone.iter().enumerate() {
-
-                        // 每个搜索结果是一个卡片
-
-                        egui::Frame::none()
-
-                            .fill(theme.bg_card)
-
-                            .stroke(Stroke::new(1.0, theme.border))
-
-                            .rounding(Rounding::same(6.0))
-
-                            .inner_margin(12.0)
-
-                            .show(ui, |ui| {
-
-                                ui.horizontal(|ui| {
-
-                                    ui.vertical(|ui| {
-
-                                        ui.horizontal(|ui| {
-
-                                            ui.label(RichText::new(&key.name).size(14.0).strong().color(theme.accent));
-
-                                            ui.add_space(8.0);
-
-                                            ui.label(RichText::new(format!("({})", key.provider)).size(12.0).color(theme.text_secondary));
-
-                                            ui.add_space(8.0);
-
-
-
-                                            // 环境标签（带颜色）
-
-                                            let env_color = match key.environment.to_string().as_str() {
-
-                                                "production" => theme.error,
-
-                                                "staging" => theme.warning,
-
-                                                _ => theme.success,
-
-                                            };
-
-                                            ui.label(
-
-                                                RichText::new(key.environment.to_string())
-
-                                                    .size(11.0).color(env_color).family(FontFamily::Monospace),
-
-                                            );
-
-                                        });
-
-
-
-                                        // 描述（如果有）
-
-                                        if let Some(ref desc) = key.description {
-
-                                            ui.label(RichText::new(desc).size(12.0).color(theme.text_dim));
-
-                                        }
-
-                                    });
-
-
-
-                                    // 右对齐：复制按钮
-
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-
-                                        if ui.add(
-
-                                            egui::Button::new(RichText::new("📋 复制").size(12.0).color(Color32::WHITE))
-
-                                                .fill(theme.accent)
-
-                                                .min_size(Vec2::new(70.0, 28.0))
-
-                                                .rounding(Rounding::same(4.0))
-
-                                        ).clicked() {
-
-                                            match self.vault.get_key(&key.name, &key.environment.to_string()) {
-
-                                                Ok((_, value)) => self.copy_to_clipboard(&value),
-
-                                                Err(e) => self.add_notification(Notification::error(format!("获取密钥失败: {}", e))),
-
-                                            }
-
-                                        }
-
-                                    });
-
-                                });
-
-                            });
-
-                        ui.add_space(6.0);
-
-                    }
-
-                });
+                self.navigate_to(View::GroupList);
 
             }
 
         });
 
+        ui.add_space(top_pad);
+
+        ui.horizontal(|ui| {
+
+            ui.add_space(left_pad);
+
+            ui.vertical(|ui| {
+
+                ui.set_max_width(max_form_width);
+
+                // ===== 标题 =====
+
+                ui.label(RichText::new(title).size(22.0).strong().color(theme.text_primary));
+
+                ui.add_space(16.0);
+
+                // ===== 表单卡片 =====
+
+                egui::Frame::none()
+
+                    .fill(theme.bg_card)
+
+                    .stroke(Stroke::new(1.0, theme.border))
+
+                    .rounding(Rounding::same(8.0))
+
+                    .inner_margin(24.0)
+
+                    .show(ui, |ui| {
+
+                        let available_w = ui.available_width();
+
+                        let input_width = (available_w * 0.65).max(200.0);
+
+                        egui::Grid::new("group_edit_form")
+
+                            .num_columns(2)
+
+                            .spacing([12.0, 16.0])
+
+                            .show(ui, |ui| {
+
+                                // ------ 名称（必填 *）------
+
+                                ui.label(RichText::new("名称 *").size(13.0).color(theme.text_secondary));
+
+                                ui.vertical(|ui| {
+
+                                    let name_edit = egui::TextEdit::singleline(&mut self.group_edit_form.name)
+
+                                        .desired_width(input_width)
+
+                                        .hint_text("例如: backend-services");
+
+                                    if self.group_edit_is_new {
+
+                                        ui.add(name_edit);
+
+                                    } else {
+
+                                        ui.add(name_edit.interactive(false)); // 编辑模式禁止修改名称
+
+                                    }
+
+                                    if let Some(ref err) = self.group_edit_form.name_error {
+
+                                        ui.label(RichText::new(err).size(11.0).color(theme.error));
+
+                                    }
+
+                                });
+
+                                ui.end_row();
+
+                                // ------ 描述（可选）------
+
+                                ui.label(RichText::new("描述").size(13.0).color(theme.text_secondary));
+
+                                ui.add(
+
+                                    egui::TextEdit::multiline(&mut self.group_edit_form.description)
+
+                                        .desired_width(input_width)
+
+                                        .desired_rows(3)
+
+                                        .hint_text("可选：对分组的说明")
+
+                                );
+
+                                ui.end_row();
+
+                            });
+
+                        ui.add_space(20.0);
+
+                        // ===== 保存按钮 =====
+
+                        let btn_text = if self.group_edit_is_new { "创建分组" } else { "保存修改" };
+
+                        if ui.add(
+
+                            egui::Button::new(RichText::new(btn_text).size(14.0).color(Color32::WHITE))
+
+                                .fill(theme.accent)
+
+                                .min_size(Vec2::new(120.0, 38.0))
+
+                                .rounding(Rounding::same(6.0))
+
+                        ).clicked() {
+
+                            self.group_edit_form.name_error = None;
+
+                            // 验证名称
+
+                            if self.group_edit_form.name.trim().is_empty() {
+
+                                self.group_edit_form.name_error = Some("分组名称不能为空".to_string());
+
+                            } else if self.group_edit_is_new {
+
+                                // 新建模式
+
+                                match self.vault.create_group(self.group_edit_form.name.clone()) {
+
+                                    Ok(_) => {
+
+                                        // 如果有描述，更新分组描述
+
+                                        if !self.group_edit_form.description.trim().is_empty() {
+
+                                            let groups = self.vault.list_groups().unwrap_or_default();
+
+                                            if let Some(new_group) = groups.iter().find(|g| g.name == self.group_edit_form.name) {
+
+                                                let _ = self.vault.update_group_description(&new_group.id, Some(self.group_edit_form.description.clone()));
+
+                                            }
+
+                                        }
+
+                                        self.add_notification(Notification::success(format!("分组 '{}' 已创建", self.group_edit_form.name)));
+
+                                        self.navigate_to(View::GroupList);
+
+                                    }
+
+                                    Err(e) => {
+
+                                        self.group_edit_form.name_error = Some(format!("{}", e));
+
+                                    }
+
+                                }
+
+                            } else if let Some(idx) = index {
+
+                                // 编辑模式
+
+                                if let Some(group) = self.group_list.get(idx) {
+
+                                    let new_desc = if self.group_edit_form.description.trim().is_empty() {
+
+                                        None
+
+                                    } else {
+
+                                        Some(self.group_edit_form.description.clone())
+
+                                    };
+
+                                    match self.vault.update_group(&group.id, &self.group_edit_form.name, new_desc) {
+
+                                        Ok(()) => {
+
+                                            self.add_notification(Notification::success("分组已更新"));
+
+                                            self.navigate_to(View::GroupList);
+
+                                        }
+
+                                        Err(e) => {
+
+                                            self.group_edit_form.name_error = Some(format!("{}", e));
+
+                                        }
+
+                                    }
+
+                                }
+
+                            }
+
+                        }
+
+                    });
+
+            });
+
+        });
+
     }
+
+
+
 
 
 
@@ -6300,8 +6233,6 @@ match self.vault.create_group(self.new_group_name.clone()) {
 
                     ).clicked() {
 
-                        self.change_password_error = None;
-
                         self.change_password_success = false;
 
 
@@ -6642,7 +6573,8 @@ impl eframe::App for VaultApp {
 
                         View::GroupList => self.show_group_list_view(ui),
 
-                        View::Search => self.show_search_view(ui),
+                        View::GroupEdit(idx) => self.show_group_edit_view(ui, idx),
+
 
                         View::AuditLog => self.show_audit_log_view(ui),
 

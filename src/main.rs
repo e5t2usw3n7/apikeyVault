@@ -4,7 +4,7 @@ mod crypto;
 mod error;
 mod gui;
 mod import_export;
-mod shell;
+// mod shell; // unused module
 mod storage;
 mod validation;
 mod cli;

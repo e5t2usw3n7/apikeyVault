@@ -477,13 +477,13 @@ impl From<CliKeyType> for crate::core::key::KeyType {
     }
 }
 
-impl From<ShellType> for crate::shell::ShellType {
-    fn from(st: ShellType) -> Self {
-        match st {
-            ShellType::Bash => crate::shell::ShellType::Bash,
-            ShellType::Zsh => crate::shell::ShellType::Zsh,
-            ShellType::Fish => crate::shell::ShellType::Fish,
-            ShellType::PowerShell => crate::shell::ShellType::PowerShell,
-        }
-    }
-}
+// impl From<ShellType> for crate::shell::ShellType {
+//     fn from(st: ShellType) -> Self {
+//         match st {
+//             ShellType::Bash => crate::shell::ShellType::Bash,
+//             ShellType::Zsh => crate::shell::ShellType::Zsh,
+//             ShellType::Fish => crate::shell::ShellType::Fish,
+//             ShellType::PowerShell => crate::shell::ShellType::PowerShell,
+//         }
+//     }
+// }
