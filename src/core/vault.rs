@@ -491,6 +491,26 @@ impl Vault {
         Ok((entry, value))
     }
 
+    /// 测试指定密钥的连通性
+    pub fn test_key_connectivity(&mut self, name: &str, environment: &str) -> Result<crate::core::connectivity::ConnectivityResult, AppError> {
+        let (entry, value) = self.get_key(name, environment)?;
+        let base_url = entry.metadata.get("base_url").and_then(|v| v.as_str());
+        let result = crate::core::connectivity::test_connectivity(&value, &entry.provider, base_url);
+
+        self.log_action(
+            AuditAction::KeyTested,
+            "key",
+            Some(entry.id.to_string()),
+            Some(serde_json::json!({
+                "provider": entry.provider,
+                "success": result.success,
+                "message": result.message,
+            })),
+        )?;
+
+        Ok(result)
+    }
+
     // ==================== 密钥过滤 ====================
 
     /// 列出所有密钥（带过滤）
@@ -671,6 +691,67 @@ impl Vault {
         }
 
         Ok(())
+    }
+
+    /// 更新密钥元数据
+    pub fn update_key_metadata(&mut self, name: &str, environment: &str, metadata: serde_json::Value) -> Result<KeyEntry, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        let repo = self.repo()?;
+        let mut entry = repo.get_key_by_name(name, environment)?
+            .ok_or_else(|| AppError::KeyNotFound(name.to_string()))?;
+
+        entry.metadata = metadata;
+        entry.updated_at = Utc::now();
+
+        let repo = self.repo()?;
+        repo.update_key(&entry)?;
+
+        self.touch();
+        Ok(entry)
+    }
+
+    /// 重命名密钥
+    pub fn rename_key(&mut self, old_name: &str, environment: &str, new_name: &str) -> Result<KeyEntry, AppError> {
+        self.check_auto_lock();
+        if self.state != VaultState::Unlocked {
+            return Err(AppError::VaultLocked);
+        }
+
+        // 验证新名称
+        crate::validation::validate_key_name(new_name)?;
+
+        // 检查新名称是否已存在
+        let repo = self.repo()?;
+        if repo.get_key_by_name(new_name, environment)?.is_some() {
+            return Err(AppError::DuplicateKeyName(format!("{} (环境: {})", new_name, environment)));
+        }
+
+        // 获取原密钥
+        let repo = self.repo()?;
+        let mut entry = repo.get_key_by_name(old_name, environment)?
+            .ok_or_else(|| AppError::KeyNotFound(old_name.to_string()))?;
+
+        // 更新名称
+        entry.name = new_name.to_string();
+        entry.updated_at = Utc::now();
+
+        // 保存
+        let repo = self.repo()?;
+        repo.update_key(&entry)?;
+
+        self.log_action(
+            AuditAction::KeyUpdated,
+            "key",
+            Some(entry.id.to_string()),
+            Some(serde_json::json!({"old_name": old_name, "new_name": new_name})),
+        )?;
+
+        self.touch();
+        Ok(entry)
     }
 
     /// 删除密钥

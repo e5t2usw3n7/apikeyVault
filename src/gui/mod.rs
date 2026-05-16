@@ -407,6 +407,11 @@ struct KeyEditForm {
 
     value_error: Option<String>,// 密钥值验证错误信息
 
+    // 自定义提供商相关字段
+    is_custom_provider: bool,  // 是否选择了自定义提供商
+    custom_provider_name: String,  // 自定义提供商名称
+    custom_provider_url: String,   // 自定义提供商 URL（用于连通性测试）
+
 }
 
 
@@ -443,6 +448,11 @@ impl Default for KeyEditForm {
             name_error: None,                       // 无名称错误
 
             value_error: None,                      // 无值错误
+
+            // 自定义提供商字段
+            is_custom_provider: false,
+            custom_provider_name: String::new(),
+            custom_provider_url: String::new(),
 
         }
 
@@ -490,6 +500,11 @@ impl KeyEditForm {
             name_error: None,                       // 清除之前的错误
 
             value_error: None,
+
+            // 自定义提供商字段 - 检查是否是常见提供商
+            is_custom_provider: !is_common_provider(&entry.provider),
+            custom_provider_name: if is_common_provider(&entry.provider) { String::new() } else { entry.provider.clone() },
+            custom_provider_url: entry.metadata.get("base_url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
 
         }
 
@@ -822,6 +837,13 @@ pub struct VaultApp {
 
     tag_dialog_input: String,      // 标签输入弹窗中的文本
 
+    // ----- 连通性测试状态 -----
+    connectivity_testing: Option<String>,       // 正在测试的密钥名称（用于显示 loading 状态）
+    connectivity_testing_key: Option<String>,   // 正在测试的密钥结果键（用于存储结果）
+    connectivity_results: std::collections::HashMap<String, crate::core::connectivity::ConnectivityResult>,  // 测试结果缓存（key = "name|environment"）
+    connectivity_tx: Option<crossbeam_channel::Sender<crate::core::connectivity::ConnectivityResult>>,  // 测试结果发送端
+    connectivity_rx: Option<crossbeam_channel::Receiver<crate::core::connectivity::ConnectivityResult>>,  // 测试结果接收端
+
 }
 
 
@@ -1054,6 +1076,13 @@ impl VaultApp {
             tag_dialog_open: false,              // 标签弹窗关闭
 
             tag_dialog_input: String::new(),     // 空标签输入
+
+            // 连通性测试状态
+            connectivity_testing: None,
+            connectivity_testing_key: None,
+            connectivity_results: std::collections::HashMap::new(),
+            connectivity_tx: None,
+            connectivity_rx: None,
 
         }
 
@@ -2846,6 +2875,8 @@ impl VaultApp {
 
                                     AuditAction::VaultLocked => "🔒",
 
+                                    AuditAction::BackupCreated => "💾",
+
                                     _ => "•",  // 其他操作使用圆点
 
                                 };
@@ -3264,7 +3295,7 @@ impl VaultApp {
 
                 egui::ComboBox::from_id_salt("filter_env")
 
-                    .selected_text(if self.key_filter_env.is_empty() { "所有环境" } else { &self.key_filter_env })
+                    .selected_text(RichText::new(if self.key_filter_env.is_empty() { "所有环境" } else { &self.key_filter_env }).color(Color32::from_rgb(230, 230, 240)))
 
                     .show_ui(ui, |ui| {
 
@@ -3429,13 +3460,14 @@ impl VaultApp {
 
                     // 列宽在ScrollArea内部计算，确保与数据行共享同一内容区宽度
                     let table_w = ui.available_width() - 55.0;
-                    // 6列宽度比例：名称20%, 提供商14%, 类型12%, 环境12%, 标签24%, 操作18%
+                    // 7列宽度比例：名称18%, 提供商12%, 类型10%, 环境10%, 标签22%, 连通性10%, 操作18%
                     let tbl_col_widths = [
-                        table_w * 0.20,
-                        table_w * 0.14,
+                        table_w * 0.18,
                         table_w * 0.12,
-                        table_w * 0.12,
-                        table_w * 0.24,
+                        table_w * 0.10,
+                        table_w * 0.10,
+                        table_w * 0.22,
+                        table_w * 0.10,
                         table_w * 0.18,
                     ];
 
@@ -3451,7 +3483,7 @@ impl VaultApp {
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.add_space(8.0);
-                                let headers = ["名称", "提供商", "类型", "环境", "标签", "操作"];
+                                let headers = ["名称", "提供商", "类型", "环境", "标签", "连通性", "操作"];
 
                                 for (i, header) in headers.iter().enumerate() {
                                     // 表头项是可点击的排序按钮
@@ -3536,12 +3568,77 @@ impl VaultApp {
                                         egui::Label::new(RichText::new(tags_str).size(13.0).color(theme.text_dim)).truncate(),
                                     );
 
+                                    // ------ 连通性测试列（固定宽度，避免布局跳动）------
+                                    let result_key = format!("{}|{}", key.name, key.environment);
+                                    // 分配固定宽度区域
+                                    let (col_rect, _) = ui.allocate_exact_size(
+                                        Vec2::new(tbl_col_widths[5], 32.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    // 在固定区域内水平布局
+                                    let mut child_ui = ui.new_child(
+                                        egui::UiBuilder::new()
+                                            .max_rect(egui::Rect::from_min_size(
+                                                col_rect.min,
+                                                Vec2::new(tbl_col_widths[5], 32.0),
+                                            ))
+                                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                    );
+
+                                    // 测试按钮
+                                    let btn = egui::Button::new(RichText::new("🔗").size(12.0).color(theme.accent))
+                                        .fill(Color32::TRANSPARENT).frame(false);
+                                    if child_ui.add_sized(Vec2::new(24.0, 24.0), btn).on_hover_text("测试 API 连通性").clicked() {
+                                        // 触发异步测试
+                                        self.connectivity_testing = Some(key.name.clone());
+                                        self.connectivity_testing_key = Some(result_key.clone());
+                                        let provider = key.provider.clone();
+                                        let env_str = key.environment.to_string();
+                                        // 在主线程解密密钥
+                                        match self.vault.get_key(&key.name, &env_str) {
+                                            Ok((entry, value)) => {
+                                                let base_url = entry.metadata.get("base_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                                // 创建 channel（如果还没有）
+                                                let (tx, rx) = crossbeam_channel::bounded(1);
+                                                self.connectivity_tx = Some(tx.clone());
+                                                self.connectivity_rx = Some(rx);
+                                                // 在新线程中执行网络请求
+                                                std::thread::spawn(move || {
+                                                    let result = crate::core::connectivity::test_connectivity(&value, &provider, base_url.as_deref());
+                                                    let _ = tx.send(result);
+                                                });
+                                            }
+                                            Err(e) => {
+                                                self.connectivity_testing = None;
+                                                self.connectivity_testing_key = None;
+                                                self.add_notification(Notification::error(format!("获取密钥失败: {}", e)));
+                                            }
+                                        }
+                                    }
+
+                                    // 结果图标（固定位置，预留空间）
+                                    child_ui.add_space(4.0);
+                                    if self.connectivity_testing.as_deref() == Some(&key.name) {
+                                        // 正在测试中
+                                        child_ui.label(RichText::new("⏳").size(13.0).color(theme.warning));
+                                    } else if let Some(result) = self.connectivity_results.get(&result_key) {
+                                        // 已有测试结果
+                                        let (icon, icon_color) = if result.success {
+                                            ("✅", theme.success)
+                                        } else {
+                                            ("❌", theme.error)
+                                        };
+                                        let hover_text = format!("{}\n{}", result.provider, result.message);
+                                        child_ui.label(RichText::new(icon).size(13.0).color(icon_color))
+                                            .on_hover_text(hover_text);
+                                    }
+
                                     // ------ 操作按钮列（居中显示）------
                                     let action_btn_size = Vec2::new(24.0, 24.0);
                                     let total_btn_width = action_btn_size.x * 3.0 + ui.spacing().item_spacing.x * 2.0;
                                     // 先分配整列区域，获取精确 rect
                                     let (col_rect, _) = ui.allocate_exact_size(
-                                        Vec2::new(tbl_col_widths[5], 32.0),
+                                        Vec2::new(tbl_col_widths[6], 32.0),
                                         egui::Sense::hover(),
                                     );
                                     // 在分配的区域内居中放置按钮组
@@ -4068,7 +4165,7 @@ impl VaultApp {
         let max_form_width = (available_w * 0.55).max(420.0).min(2400.0);
         let form_estimated_height = (available_h * 0.75).max(400.0).min(3900.0);
         // 响应式留白
-        let top_pad = ((available_h - form_estimated_height) / 2.5).max(20.0);//除以2.5是为了补偿占位，确保视觉上真正居中
+        let top_pad = ((available_h - form_estimated_height) / 8.0).max(20.0);//除以2.5是为了补偿占位，确保视觉上真正居中
         let left_pad = ((available_w - max_form_width) / 1.65).max(20.0); //除以1.65是为了补偿占位，确保视觉上真正居中
 
         // ===== 返回按钮（右侧面板左上角） =====
@@ -4151,15 +4248,8 @@ impl VaultApp {
 
                                     .hint_text("例如: openai-api-key");
 
-                                if self.edit_is_new {
-
-                                    ui.add(name_edit);  // 新建模式可编辑
-
-                                } else {
-
-                                    ui.add(name_edit.interactive(false));  // 编辑模式禁止修改名称
-
-                                }
+                                // 新建和编辑模式都允许修改名称
+                                ui.add(name_edit);
 
                                 // 显示名称验证错误
 
@@ -4179,15 +4269,53 @@ impl VaultApp {
 
                             ui.label(RichText::new("提供商 *").size(13.0).color(theme.text_secondary));
 
-                            ui.add(
+                            // 提供商下拉选择框
+                            let current_provider = if self.edit_form.is_custom_provider {
+                                "自定义".to_string()
+                            } else {
+                                self.edit_form.provider.clone()
+                            };
 
-                                egui::TextEdit::singleline(&mut self.edit_form.provider)
+                            egui::ComboBox::from_id_salt("provider_combo")
+                                .selected_text(RichText::new(&current_provider).color(Color32::from_rgb(230, 230, 240)))
+                                .width(input_width)
+                                .show_ui(ui, |ui| {
+                                    // 常见提供商选项
+                                    for &provider in COMMON_PROVIDERS {
+                                        if ui.selectable_value(&mut self.edit_form.provider, provider.to_string(), provider).clicked() {
+                                            self.edit_form.is_custom_provider = false;
+                                        }
+                                    }
+                                    // 自定义选项
+                                    if ui.selectable_value(&mut self.edit_form.is_custom_provider, true, "自定义").clicked() {
+                                        self.edit_form.provider = self.edit_form.custom_provider_name.clone();
+                                    }
+                                });
 
-                                    .desired_width(input_width)
+                            // 如果选择了自定义提供商，显示额外的输入框
+                            if self.edit_form.is_custom_provider {
+                                ui.end_row();
 
-                                    .hint_text("例如: OpenAI, AWS, Google"),
+                                // 自定义提供商名称
+                                ui.label(RichText::new("提供商名称 *").size(13.0).color(theme.text_secondary));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.edit_form.custom_provider_name)
+                                        .desired_width(input_width)
+                                        .hint_text("输入提供商名称"),
+                                );
+                                // 同步到 provider 字段
+                                self.edit_form.provider = self.edit_form.custom_provider_name.clone();
 
-                            );
+                                ui.end_row();
+
+                                // 自定义提供商 URL
+                                ui.label(RichText::new("API URL").size(13.0).color(theme.text_secondary));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.edit_form.custom_provider_url)
+                                        .desired_width(input_width)
+                                        .hint_text("例如: https://api.example.com"),
+                                );
+                            }
 
                             ui.end_row();
 
@@ -4199,7 +4327,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("key_type_combo")
 
-                                .selected_text(&self.edit_form.key_type_str)
+                                .selected_text(RichText::new(&self.edit_form.key_type_str).color(Color32::from_rgb(230, 230, 240)))
 
                                 .width(input_width)
 
@@ -4277,7 +4405,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("env_combo")
 
-                                .selected_text(&self.edit_form.environment_str)
+                                .selected_text(RichText::new(&self.edit_form.environment_str).color(Color32::from_rgb(230, 230, 240)))
 
                                 .width(input_width)
 
@@ -4303,7 +4431,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("group_combo")
 
-                                .selected_text(if self.edit_form.group_id_str.is_empty() { "无分组" } else { &self.edit_form.group_id_str })
+                                .selected_text(RichText::new(if self.edit_form.group_id_str.is_empty() { "无分组" } else { &self.edit_form.group_id_str }).color(Color32::from_rgb(230, 230, 240)))
 
                                 .width(input_width)
 
@@ -4591,6 +4719,18 @@ impl VaultApp {
 
                 Ok(entry) => {
 
+                    // 如果是自定义提供商且设置了URL，更新 metadata
+                    if self.edit_form.is_custom_provider && !self.edit_form.custom_provider_url.is_empty() {
+                        let metadata = serde_json::json!({
+                            "base_url": self.edit_form.custom_provider_url
+                        });
+                        let _ = self.vault.update_key_metadata(
+                            &entry.name,
+                            &entry.environment.to_string(),
+                            metadata,
+                        );
+                    }
+
                     // 如果设置了过期时间，尝试更新
 
                     if let Some(_exp) = expires_at {
@@ -4631,6 +4771,23 @@ impl VaultApp {
 
             let key = &self.key_list[idx];
 
+            let old_name = key.name.clone();
+            let env_str = key.environment.to_string();
+            let new_name = self.edit_form.name.clone();
+
+            // 如果名称发生变化，先重命名
+            if new_name != old_name {
+                match self.vault.rename_key(&old_name, &env_str, &new_name) {
+                    Ok(_) => {
+                        self.add_notification(Notification::success(format!("密钥已重命名: '{}' -> '{}'", old_name, new_name)));
+                    }
+                    Err(e) => {
+                        self.add_notification(Notification::error(format!("重命名失败: {}", e)));
+                        return; // 重命名失败则不继续更新其他字段
+                    }
+                }
+            }
+
             // 如果值为空，表示用户不更新值（保留原值）
 
             let new_value = if self.edit_form.value.is_empty() { None } else { Some(self.edit_form.value.as_str()) };
@@ -4641,9 +4798,9 @@ impl VaultApp {
 
             match self.vault.update_key(
 
-                &key.name,                         // 密钥名称（不可修改）
+                &new_name,                         // 使用新名称
 
-                &key.environment.to_string(),       // 环境（不可修改）
+                &env_str,                           // 环境
 
                 new_value,                          // 新值（可选）
 
@@ -4655,7 +4812,19 @@ impl VaultApp {
 
                 Ok(_) => {
 
-                    self.add_notification(Notification::success(format!("密钥 '{}' 已更新", key.name)));
+                    // 如果是自定义提供商且设置了URL，更新 metadata
+                    if self.edit_form.is_custom_provider && !self.edit_form.custom_provider_url.is_empty() {
+                        let metadata = serde_json::json!({
+                            "base_url": self.edit_form.custom_provider_url
+                        });
+                        let _ = self.vault.update_key_metadata(
+                            &new_name,
+                            &env_str,
+                            metadata,
+                        );
+                    }
+
+                    self.add_notification(Notification::success(format!("密钥 '{}' 已更新", new_name)));
 
                     self.refresh_keys();
 
@@ -5387,10 +5556,19 @@ impl VaultApp {
                                     // 资源ID（等宽字体）
 
                                     let res_id = log.resource_id.as_deref().unwrap_or("-");
+                                    let display_id = if log.action == AuditAction::BackupCreated {
+                                        // 备份操作只显示文件名，不显示完整路径
+                                        std::path::Path::new(res_id)
+                                            .file_name()
+                                            .map(|f| f.to_string_lossy().to_string())
+                                            .unwrap_or_else(|| res_id.to_string())
+                                    } else {
+                                        res_id.to_string()
+                                    };
 
                                     ui.add_sized(Vec2::new(audit_cols[3], 28.0), egui::Label::new(
 
-                                        RichText::new(res_id).size(11.0).color(theme.text_dim).family(FontFamily::Monospace),
+                                        RichText::new(display_id).size(11.0).color(theme.text_dim).family(FontFamily::Monospace),
 
                                     ));
 
@@ -5434,15 +5612,35 @@ impl VaultApp {
 
             // ===== 导入和导出并排 =====
 
+            let avail_w = ui.available_width();
+
+            let panel_width = (avail_w - 16.0) / 2.0;  // 各占一半，减去中间间距 16px
+
+            let content_width = (panel_width - 40.0).max(40.0);  // 减去 inner_margin(20.0) 左右各20px
+
+
+
             ui.horizontal(|ui| {
 
-                let half_width = (ui.available_width() - 16.0) / 2.0;  // 各占一半宽度
-
-                let inner_half = (half_width - 40.0).max(40.0);  // inner_margin(20.0) 左右各20px合计40px
-
-
-
                 // ----- 导入面板 -----
+
+                let (import_rect, _) = ui.allocate_exact_size(
+
+                    Vec2::new(panel_width, 200.0),
+
+                    egui::Sense::hover(),
+
+                );
+
+                let mut import_ui = ui.new_child(
+
+                    egui::UiBuilder::new()
+
+                        .max_rect(import_rect)
+
+                        .layout(egui::Layout::top_down(egui::Align::LEFT)),
+
+                );
 
                 egui::Frame::none()
 
@@ -5454,9 +5652,9 @@ impl VaultApp {
 
                     .inner_margin(20.0)
 
-                    .show(ui, |ui| {
+                    .show(&mut import_ui, |ui| {
 
-                        ui.set_min_width(inner_half);
+                        ui.set_width(content_width);
 
                         ui.label(RichText::new("📥 导入密钥").size(16.0).strong().color(theme.text_primary));
 
@@ -5472,7 +5670,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("import_format")
 
-                                .selected_text(&self.import_format)
+                                .selected_text(RichText::new(&self.import_format).color(Color32::from_rgb(230, 230, 240)))
 
                                 .show_ui(ui, |ui| {
 
@@ -5502,7 +5700,7 @@ impl VaultApp {
 
                                 egui::TextEdit::singleline(&mut self.import_file_path)
 
-                                    .desired_width(half_width - 120.0)
+                                    .desired_width(content_width - 80.0)
 
                                     .hint_text("文件路径"),
 
@@ -5520,7 +5718,7 @@ impl VaultApp {
 
                         if ui.add(
 
-                            egui::Button::new(RichText::new("📥 导入").size(13.0).color(Color32::WHITE))
+                            egui::Button::new(RichText::new("     📥 导入").size(15.0).color(Color32::WHITE))
 
                                 .fill(theme.accent)
 
@@ -5530,7 +5728,7 @@ impl VaultApp {
 
                         ).clicked() {
 
-                            self.do_import();  // 执行导入
+                            self.do_import();
 
                         }
 
@@ -5544,6 +5742,24 @@ impl VaultApp {
 
                 // ----- 导出面板 -----
 
+                let (export_rect, _) = ui.allocate_exact_size(
+
+                    Vec2::new(panel_width, 200.0),
+
+                    egui::Sense::hover(),
+
+                );
+
+                let mut export_ui = ui.new_child(
+
+                    egui::UiBuilder::new()
+
+                        .max_rect(export_rect)
+
+                        .layout(egui::Layout::top_down(egui::Align::LEFT)),
+
+                );
+
                 egui::Frame::none()
 
                     .fill(theme.bg_card)
@@ -5554,9 +5770,9 @@ impl VaultApp {
 
                     .inner_margin(20.0)
 
-                    .show(ui, |ui| {
+                    .show(&mut export_ui, |ui| {
 
-                        ui.set_min_width(inner_half);
+                        ui.set_width(content_width);
 
                         ui.label(RichText::new("📤 导出密钥").size(16.0).strong().color(theme.text_primary));
 
@@ -5572,7 +5788,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("export_format")
 
-                                .selected_text(&self.export_format)
+                                .selected_text(RichText::new(&self.export_format).color(Color32::from_rgb(230, 230, 240)))
 
                                 .show_ui(ui, |ui| {
 
@@ -5602,7 +5818,7 @@ impl VaultApp {
 
                                 egui::TextEdit::singleline(&mut self.export_file_path)
 
-                                    .desired_width(half_width - 120.0)
+                                    .desired_width(content_width - 80.0)
 
                                     .hint_text("导出文件路径"),
 
@@ -5620,9 +5836,9 @@ impl VaultApp {
 
                         if ui.add(
 
-                            egui::Button::new(RichText::new("📤 导出").size(13.0).color(Color32::WHITE))
+                            egui::Button::new(RichText::new("     📤 导出").size(15.0).color(Color32::WHITE))
 
-                                .fill(theme.success)  // 绿色表示导出
+                                .fill(theme.success)
 
                                 .min_size(Vec2::new(100.0, 34.0))
 
@@ -5630,7 +5846,7 @@ impl VaultApp {
 
                         ).clicked() {
 
-                            self.do_export();  // 执行导出
+                            self.do_export();
 
                         }
 
@@ -6001,7 +6217,10 @@ impl VaultApp {
 
                             ui.label(RichText::new("自动锁定时间（分钟）:").size(13.0).color(theme.text_secondary));
 
-                            ui.add(egui::Slider::new(&mut self.settings_auto_lock, 1..=60).suffix(" 分钟"));
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Slider::new(&mut self.settings_auto_lock, 1..=60));
+                                ui.label(RichText::new("分钟").size(13.0).color(theme.text_dim));
+                            });
 
                             ui.end_row();
 
@@ -6011,7 +6230,10 @@ impl VaultApp {
 
                             ui.label(RichText::new("剪贴板自动清除（秒）:").size(13.0).color(theme.text_secondary));
 
-                            ui.add(egui::Slider::new(&mut self.settings_clipboard_clear, 5..=120).suffix(" 秒"));
+                            ui.horizontal(|ui| {
+                                ui.add(egui::Slider::new(&mut self.settings_clipboard_clear, 5..=120));
+                                ui.label(RichText::new("秒").size(13.0).color(theme.text_dim));
+                            });
 
                             ui.end_row();
 
@@ -6023,7 +6245,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("theme_combo")
 
-                                .selected_text(&self.settings_theme)
+                                .selected_text(RichText::new(&self.settings_theme).color(Color32::from_rgb(230, 230, 240)))
 
                                 .show_ui(ui, |ui| {
 
@@ -6043,7 +6265,7 @@ impl VaultApp {
 
                             egui::ComboBox::from_id_salt("default_env_combo")
 
-                                .selected_text(&self.settings_default_env)
+                                .selected_text(RichText::new(&self.settings_default_env).color(Color32::from_rgb(230, 230, 240)))
 
                                 .show_ui(ui, |ui| {
 
@@ -6079,7 +6301,7 @@ impl VaultApp {
 
                     if ui.add(
 
-                        egui::Button::new(RichText::new("💾 保存设置").size(13.0).color(Color32::WHITE))
+                        egui::Button::new(RichText::new("   💾 保存设置").size(15.0).color(Color32::WHITE))
 
                             .fill(theme.accent)
 
@@ -6369,11 +6591,34 @@ impl VaultApp {
 
 // ==================== 辅助函数 ====================
 
+/// 常见提供商列表
+const COMMON_PROVIDERS: &[&str] = &[
+    "DeepSeek",
+    "OpenAI",
+    "Anthropic",
+    "Google",
+    "Gemini",
+    "AWS",
+    "Azure",
+    "阿里云",
+    "百度",
+    "智谱AI",
+    "月之暗面",
+    "MiniMax",
+    "百川智能",
+    "零一万物",
+];
+
+/// 检查是否是常见提供商
+fn is_common_provider(name: &str) -> bool {
+    COMMON_PROVIDERS.iter().any(|&p| p.eq_ignore_ascii_case(name))
+}
+
 
 
 // calculate_password_strength() - 计算密码强度分数
 
-// 使用 zxcvbn 密码强度评估库
+// 这里查了资料，使用 zxcvbn 密码强度评估库
 
 // 返回 0-4 的分数：0=非常弱, 1=弱, 2=中等, 3=强, 4=非常强
 
@@ -6427,7 +6672,9 @@ impl eframe::App for VaultApp {
 
         style.visuals.panel_fill = theme.bg_primary;          // 面板背景色
 
-        style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, theme.text_primary);  // Labels 文字颜色
+        let text_color = Color32::from_rgb(230, 230, 240);  // 统一偏白色，深色/浅色模式一致
+
+        style.visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text_color);  // Labels 文字颜色
 
 
 
@@ -6435,11 +6682,11 @@ impl eframe::App for VaultApp {
 
         style.visuals.widgets.inactive.bg_fill = theme.bg_input;          // 默认态背景
 
-        style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, theme.text_primary);  // 输入框用户文字
+        style.visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, text_color);  // 输入框用户文字
 
         style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(45, 45, 65);  // 悬停态背景（稍微变亮）
 
-        style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, theme.text_primary);    // 悬停态文字色
+        style.visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, text_color);    // 悬停态文字色
 
         style.visuals.widgets.active.bg_fill = theme.accent;              // 按下态背景=主题色
 
@@ -6487,6 +6734,20 @@ impl eframe::App for VaultApp {
 
             self.password_input.clear();
 
+        }
+
+
+
+        // ===== 3.5 检查连通性测试结果 =====
+        if let Some(ref rx) = self.connectivity_rx {
+            if let Ok(result) = rx.try_recv() {
+                // 使用测试时存储的密钥名称和环境来构建结果键
+                if let Some(ref testing_key) = self.connectivity_testing_key {
+                    self.connectivity_results.insert(testing_key.clone(), result);
+                }
+                self.connectivity_testing = None;
+                self.connectivity_testing_key = None;
+            }
         }
 
 

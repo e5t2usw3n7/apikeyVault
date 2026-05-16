@@ -403,6 +403,28 @@ fn execute_key_action(action: KeyAction, config: AppConfig) -> Result<(), AppErr
             }
             println!("✅ 密钥已删除: {}", name);
         }
+
+        KeyAction::Test { name, environment } => {
+            let mut vault = create_vault_with_session(config)?;
+            let result = if let Some(ref env) = environment {
+                vault.test_key_connectivity(&name, env)?
+            } else {
+                let (entry, value) = vault.get_key_any_env(&name)?;
+                let base_url = entry.metadata.get("base_url").and_then(|v| v.as_str());
+                crate::core::connectivity::test_connectivity(&value, &entry.provider, base_url)
+            };
+            if result.success {
+                println!("✅ {} 连通成功 ({}ms)", result.provider, result.latency_ms.unwrap_or(0));
+                if let Some(code) = result.status_code {
+                    println!("   状态码: {}", code);
+                }
+            } else {
+                println!("❌ {} 连通失败: {}", result.provider, result.message);
+                if let Some(code) = result.status_code {
+                    println!("   状态码: {}", code);
+                }
+            }
+        }
     }
 
     Ok(())

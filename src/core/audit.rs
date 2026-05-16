@@ -22,6 +22,7 @@ pub enum AuditAction {
     BackupRestored,
     VaultLocked,
     VaultUnlocked,
+    KeyTested,
 }
 
 impl std::fmt::Display for AuditAction {
@@ -45,6 +46,7 @@ impl std::fmt::Display for AuditAction {
             AuditAction::BackupRestored => write!(f, "BACKUP_RESTORED"),
             AuditAction::VaultLocked => write!(f, "VAULT_LOCKED"),
             AuditAction::VaultUnlocked => write!(f, "VAULT_UNLOCKED"),
+            AuditAction::KeyTested => write!(f, "KEY_TESTED"),
         }
     }
 }

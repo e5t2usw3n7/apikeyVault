@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod connectivity;
 pub mod group;
 pub mod key;
 pub mod template;

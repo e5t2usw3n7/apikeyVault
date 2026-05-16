@@ -101,17 +101,25 @@ fn configure_chinese_font(ctx: &eframe::egui::Context) {
 }
 
 fn create_app_icon() -> eframe::egui::IconData {
-    // 创建一个 32x32 的锁形图标（简化像素画）
+    // 尝试从 logo.ico 文件加载图标
+    let icon_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("logo.ico");
+    if let Ok(img) = image::open(icon_path) {
+        let rgba_img = img.to_rgba8();
+        let (width, height) = rgba_img.dimensions();
+        let rgba = rgba_img.into_raw();
+        return eframe::egui::IconData {
+            rgba,
+            width,
+            height,
+        };
+    }
+
+    // 如果加载失败，使用备用的简单图标
     let width = 32u32;
     let height = 32u32;
     let mut rgba = vec![0u8; (width * height * 4) as usize];
-
-    // 绘制简单的锁/密钥形状图标
-    // 背景色: 透明
-    // 主色: #6C5CE7 (紫色)
     let (r, g, b) = (108u8, 92u8, 231u8);
 
-    // 锁体 - 中下方矩形 (x:8-23, y:14-25)
     for y in 14..26 {
         for x in 8..24 {
             let idx = ((y * width + x) * 4) as usize;
@@ -122,7 +130,6 @@ fn create_app_icon() -> eframe::egui::IconData {
         }
     }
 
-    // 锁孔 - 中间小圆
     for y in 18..22 {
         for x in 14..18 {
             let idx = ((y * width + x) * 4) as usize;
@@ -133,10 +140,8 @@ fn create_app_icon() -> eframe::egui::IconData {
         }
     }
 
-    // 锁环 - 上方拱形 (x:10-21, y:4-14)
     for y in 4..15 {
         for x in 10..22 {
-            // 只画边框
             if y == 4 || y == 14 || x == 10 || x == 21 {
                 let idx = ((y * width + x) * 4) as usize;
                 rgba[idx] = r;
@@ -144,7 +149,6 @@ fn create_app_icon() -> eframe::egui::IconData {
                 rgba[idx + 2] = b;
                 rgba[idx + 3] = 255;
             }
-            // 清空内部
             if y > 4 && y < 14 && x > 10 && x < 21 {
                 let idx = ((y * width + x) * 4) as usize;
                 rgba[idx] = 0;
@@ -155,7 +159,6 @@ fn create_app_icon() -> eframe::egui::IconData {
         }
     }
 
-    // 高光 - 锁体左上角
     for y in 15..17 {
         for x in 9..12 {
             let idx = ((y * width + x) * 4) as usize;

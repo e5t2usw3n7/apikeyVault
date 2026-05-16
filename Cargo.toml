@@ -75,6 +75,9 @@ indicatif = "0.17"
 # 密码强度检查
 zxcvbn = "3"
 
+# 图标处理
+image = { version = "0.25", default-features = false, features = ["ico"] }
+
 # 表格打印
 comfy-table = "7"
 
@@ -82,7 +85,7 @@ comfy-table = "7"
 notify = "6"
 
 # HTTP 客户端（用于 API 验证）
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"], optional = true }
 
 # base64
 base64 = "0.22"

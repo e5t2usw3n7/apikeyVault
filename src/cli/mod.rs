@@ -312,6 +312,16 @@ pub enum KeyAction {
         #[arg(long)]
         force: bool,
     },
+
+    /// 测试密钥连通性
+    Test {
+        /// 密钥名称
+        name: String,
+
+        /// 环境（不指定则自动搜索所有环境）
+        #[arg(short, long)]
+        environment: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
