@@ -6,6 +6,7 @@ struct ProviderEndpoint {
     test_url: &'static str,
     auth_header: &'static str,
     auth_prefix: &'static str,
+    use_post: bool,  // 是否使用 POST 请求（用于 chat/completions 类型的 API）
 }
 
 /// 内置支持的模型商列表
@@ -16,30 +17,42 @@ fn builtin_providers() -> Vec<ProviderEndpoint> {
             test_url: "https://api.deepseek.com/v1/models",
             auth_header: "Authorization",
             auth_prefix: "Bearer ",
+            use_post: false,
         },
         ProviderEndpoint {
             name: "openai",
             test_url: "https://api.openai.com/v1/models",
             auth_header: "Authorization",
             auth_prefix: "Bearer ",
+            use_post: false,
         },
         ProviderEndpoint {
             name: "anthropic",
             test_url: "https://api.anthropic.com/v1/messages",
             auth_header: "x-api-key",
             auth_prefix: "",
+            use_post: false,
         },
         ProviderEndpoint {
             name: "google",
             test_url: "https://generativelanguage.googleapis.com/v1/models",
             auth_header: "x-goog-api-key",
             auth_prefix: "",
+            use_post: false,
         },
         ProviderEndpoint {
             name: "gemini",
             test_url: "https://generativelanguage.googleapis.com/v1/models",
             auth_header: "x-goog-api-key",
             auth_prefix: "",
+            use_post: false,
+        },
+        ProviderEndpoint {
+            name: "小米mimo",
+            test_url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+            auth_header: "api-key",
+            auth_prefix: "",
+            use_post: true,
         },
     ]
 }
@@ -70,14 +83,14 @@ pub fn test_connectivity(api_key: &str, provider: &str, base_url: Option<&str>) 
     // 匹配内置模型商
     let endpoint = builtin_providers().into_iter().find(|p| p.name == provider_lower);
 
-    let (test_url, auth_header, auth_value) = if let Some(ep) = endpoint {
+    let (test_url, auth_header, auth_value, use_post) = if let Some(ep) = endpoint {
         let auth_val = build_auth_value(api_key, ep.auth_prefix);
-        (ep.test_url.to_string(), ep.auth_header.to_string(), auth_val)
+        (ep.test_url.to_string(), ep.auth_header.to_string(), auth_val, ep.use_post)
     } else if let Some(url) = base_url {
         // 回退到通用 OpenAI-compatible 端点
         let base = url.trim_end_matches('/');
         let auth_val = build_auth_value(api_key, "Bearer ");
-        (format!("{}/v1/models", base), "Authorization".to_string(), auth_val)
+        (format!("{}/v1/models", base), "Authorization".to_string(), auth_val, false)
     } else {
         return ConnectivityResult {
             provider: provider.to_string(),
@@ -108,13 +121,30 @@ pub fn test_connectivity(api_key: &str, provider: &str, base_url: Option<&str>) 
 
     let start = Instant::now();
 
-    // Google/Gemini 使用 query 参数传递 key，不走 header
+    // 根据提供商类型选择请求方式
     let response = if provider_lower == "google" || provider_lower == "gemini" {
+        // Google/Gemini 使用 query 参数传递 key，不走 header
         client
             .get(&test_url)
             .query(&[("key", api_key)])
             .send()
+    } else if use_post {
+        // 使用 POST 请求（如小米 MIMO 的 chat/completions API）
+        // 发送一个最小化的请求体来测试连通性
+        let minimal_body = serde_json::json!({
+            "model": "mimo-v2.5-pro",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_completion_tokens": 1,
+            "stream": false
+        });
+        client
+            .post(&test_url)
+            .header(&auth_header, &auth_value)
+            .header("Content-Type", "application/json")
+            .body(minimal_body.to_string())
+            .send()
     } else {
+        // 默认使用 GET 请求
         client
             .get(&test_url)
             .header(&auth_header, &auth_value)
