@@ -11,7 +11,7 @@ export function SettingsPage() {
   const lock = useVaultStore((s) => s.lock);
   const [showResetDialog, setShowResetDialog] = useState(false);
 
-  const { data: config } = useQuery({ queryKey: ["config"], queryFn: getConfig });
+  const { data: config, isLoading, error } = useQuery({ queryKey: ["config"], queryFn: getConfig });
 
   const updateMutation = useMutation({
     mutationFn: updateConfig,
@@ -25,7 +25,9 @@ export function SettingsPage() {
     onError: (err) => addNotification("error", `重置失败: ${err}`),
   });
 
-  if (!config) return <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>加载中...</div>;
+  if (isLoading) return <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>加载中...</div>;
+  if (error) return <div className="text-center py-12" style={{ color: "var(--status-error)" }}>加载失败: {String(error)}</div>;
+  if (!config) return null;
 
   const SettingRow = ({ icon: Icon, label, children }: { icon: typeof Settings; label: string; children: React.ReactNode }) => (
     <div className="flex items-center justify-between py-3">
