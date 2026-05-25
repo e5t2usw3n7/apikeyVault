@@ -119,6 +119,45 @@ body {
   color: white;
 }
 
+/* Login input focus */
+.login-input {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.login-input:focus {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px var(--brand-primary-glow);
+}
+
+.login-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Form input focus */
+.form-input {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.form-input:focus {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px var(--brand-primary-glow);
+}
+
+.form-input::placeholder {
+  color: var(--text-muted);
+}
+
+.form-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Glass card utility */
 .glass-card {
   background: var(--glass-bg);

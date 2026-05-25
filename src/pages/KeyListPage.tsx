@@ -72,15 +72,7 @@ export function KeyListPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索密钥名称或提供商..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm transition-smooth"
-            style={{
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-default)",
-              color: "var(--text-primary)",
-              outline: "none",
-            }}
-            onFocus={(e) => (e.target.style.borderColor = "var(--brand-primary)")}
-            onBlur={(e) => (e.target.style.borderColor = "var(--border-default)")}
+            className="form-input w-full pl-10 pr-4 py-2.5 rounded-xl text-sm"
           />
         </div>
         <div className="relative">
@@ -88,14 +80,8 @@ export function KeyListPage() {
           <select
             value={envFilter}
             onChange={(e) => setEnvFilter(e.target.value as Environment | "")}
-            className="pl-10 pr-4 py-2.5 rounded-xl text-sm appearance-none transition-smooth"
-            style={{
-              background: "var(--bg-surface)",
-              border: "1px solid var(--border-default)",
-              color: "var(--text-primary)",
-              outline: "none",
-              minWidth: 150,
-            }}
+            className="form-input pl-10 pr-4 py-2.5 rounded-xl text-sm appearance-none"
+            style={{ minWidth: 150 }}
           >
             <option value="">所有环境</option>
             {environments.map((env) => (

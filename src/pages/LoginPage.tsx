@@ -44,7 +44,6 @@ export function LoginPage() {
         background: "linear-gradient(135deg, var(--bg-primary) 0%, #0d0d2b 50%, #1a0a2e 100%)",
       }}
     >
-      {/* Background decoration */}
       <div
         className="absolute inset-0 opacity-30"
         style={{
@@ -53,7 +52,6 @@ export function LoginPage() {
         }}
       />
 
-      {/* Theme toggle */}
       <button
         onClick={toggleTheme}
         className="absolute top-6 right-6 p-2.5 rounded-xl transition-smooth z-10"
@@ -66,7 +64,6 @@ export function LoginPage() {
         {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
       </button>
 
-      {/* Login card */}
       <div
         className="relative z-10 w-full max-w-md mx-4 animate-scale-in"
         style={{
@@ -78,7 +75,6 @@ export function LoginPage() {
         }}
       >
         <div className="p-8">
-          {/* Header */}
           <div className="text-center mb-8">
             <div
               className="w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center"
@@ -97,7 +93,6 @@ export function LoginPage() {
             </p>
           </div>
 
-          {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-xs font-medium mb-2" style={{ color: "var(--text-secondary)" }}>
@@ -111,17 +106,9 @@ export function LoginPage() {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-10 py-3 rounded-xl text-sm transition-smooth"
-                  style={{
-                    background: "var(--bg-surface)",
-                    border: "1px solid var(--border-default)",
-                    color: "var(--text-primary)",
-                    outline: "none",
-                  }}
+                  className="login-input w-full pl-10 pr-10 py-3 rounded-xl text-sm transition-smooth"
                   placeholder="输入主密码"
                   autoFocus
-                  onFocus={(e) => (e.target.style.borderColor = "var(--brand-primary)")}
-                  onBlur={(e) => (e.target.style.borderColor = "var(--border-default)")}
                 />
                 <button
                   type="button"
@@ -147,16 +134,8 @@ export function LoginPage() {
                     type={showPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 rounded-xl text-sm transition-smooth"
-                    style={{
-                      background: "var(--bg-surface)",
-                      border: "1px solid var(--border-default)",
-                      color: "var(--text-primary)",
-                      outline: "none",
-                    }}
+                    className="login-input w-full pl-10 pr-4 py-3 rounded-xl text-sm transition-smooth"
                     placeholder="再次输入密码"
-                    onFocus={(e) => (e.target.style.borderColor = "var(--brand-primary)")}
-                    onBlur={(e) => (e.target.style.borderColor = "var(--border-default)")}
                   />
                 </div>
               </div>
@@ -181,8 +160,6 @@ export function LoginPage() {
                 boxShadow: "0 0 20px var(--brand-primary-glow)",
                 opacity: isLoading ? 0.7 : 1,
               }}
-              onMouseEnter={(e) => !isLoading && (e.currentTarget.style.background = "var(--brand-primary-hover)")}
-              onMouseLeave={(e) => !isLoading && (e.currentTarget.style.background = "var(--brand-primary)")}
             >
               {isLoading ? "处理中..." : isInitMode ? "创建保险库" : "解锁"}
             </button>
