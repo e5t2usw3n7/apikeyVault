@@ -50,19 +50,19 @@ export function SettingsPage() {
         <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--text-primary)" }}>通用设置</h3>
         <div className="divide-y" style={{ borderColor: "var(--border-default)" }}>
           <SettingRow icon={Clock} label="自动锁定时间（分钟）">
-            <input type="number" value={config.auto_lock_minutes} onChange={(e) => updateMutation.mutate({ auto_lock_minutes: parseInt(e.target.value) || 5 })} min={1} max={60} className="w-20 px-2 py-1.5 rounded-lg text-sm text-right" style={inputStyle} />
+            <input type="number" value={config.auto_lock_minutes} onChange={(e) => updateMutation.mutate({ autoLockMinutes: parseInt(e.target.value) || 5 })} min={1} max={60} className="w-20 px-2 py-1.5 rounded-lg text-sm text-right" style={inputStyle} />
           </SettingRow>
           <SettingRow icon={Clipboard} label="剪贴板自动清除（秒）">
-            <input type="number" value={config.clipboard_clear_seconds} onChange={(e) => updateMutation.mutate({ clipboard_clear_seconds: parseInt(e.target.value) || 30 })} min={5} max={120} className="w-20 px-2 py-1.5 rounded-lg text-sm text-right" style={inputStyle} />
+            <input type="number" value={config.clipboard_clear_seconds} onChange={(e) => updateMutation.mutate({ clipboardClearSeconds: parseInt(e.target.value) || 30 })} min={5} max={120} className="w-20 px-2 py-1.5 rounded-lg text-sm text-right" style={inputStyle} />
           </SettingRow>
           <SettingRow icon={Globe} label="默认环境">
-            <select value={config.default_environment} onChange={(e) => updateMutation.mutate({ default_environment: e.target.value })} className="px-3 py-1.5 rounded-lg text-sm appearance-none" style={inputStyle}>
+            <select value={config.default_environment} onChange={(e) => updateMutation.mutate({ defaultEnvironment: e.target.value })} className="px-3 py-1.5 rounded-lg text-sm appearance-none" style={inputStyle}>
               {["Production", "Staging", "Development", "Testing"].map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
           </SettingRow>
           <SettingRow icon={Shield} label="启用审计日志">
             <button
-              onClick={() => updateMutation.mutate({ audit_log_enabled: !config.audit_log_enabled })}
+              onClick={() => updateMutation.mutate({ auditLogEnabled: !config.audit_log_enabled })}
               className="w-10 h-5 rounded-full transition-smooth relative"
               style={{ background: config.audit_log_enabled ? "var(--status-success)" : "var(--border-hover)" }}
             >

@@ -4,11 +4,11 @@ import type { KeyEntry, ConnectivityResult } from "@/types";
 export interface AddKeyParams {
   name: string;
   provider: string;
-  key_type: string;
+  keyType: string;
   value: string;
   environment: string;
   description?: string;
-  group_id?: string;
+  groupId?: string;
   tags: string[];
 }
 

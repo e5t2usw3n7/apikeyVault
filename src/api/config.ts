@@ -6,11 +6,11 @@ export async function getConfig(): Promise<AppConfig> {
 }
 
 export async function updateConfig(params: {
-  auto_lock_minutes?: number;
-  clipboard_clear_seconds?: number;
+  autoLockMinutes?: number;
+  clipboardClearSeconds?: number;
   theme?: string;
-  default_environment?: string;
-  audit_log_enabled?: boolean;
+  defaultEnvironment?: string;
+  auditLogEnabled?: boolean;
 }): Promise<void> {
   return invoke("update_config", params);
 }

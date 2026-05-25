@@ -106,9 +106,9 @@ export function KeyEditPage() {
         return updateKey({ name: form.name, environment: form.environment, value: form.value || undefined, description: form.description || undefined, tags });
       }
       return addKey({
-        name: form.name, provider: actualProvider, key_type: form.key_type,
+        name: form.name, provider: actualProvider, keyType: form.key_type,
         value: form.value, environment: form.environment,
-        description: form.description || undefined, group_id: form.group_id || undefined, tags,
+        description: form.description || undefined, groupId: form.group_id || undefined, tags,
       });
     },
     onSuccess: () => {
