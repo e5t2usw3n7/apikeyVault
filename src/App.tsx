@@ -23,8 +23,12 @@ export default function App() {
 
   useEffect(() => {
     const init = async () => {
-      const restored = await restoreSession();
-      if (!restored) {
+      try {
+        const restored = await restoreSession();
+        if (!restored) {
+          await checkStatus();
+        }
+      } catch {
         await checkStatus();
       }
     };
