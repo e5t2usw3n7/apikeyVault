@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { KeyEntry, ConnectivityResult } from "@/types";
 
 export interface AddKeyParams {
+  [key: string]: unknown;
   name: string;
   provider: string;
   keyType: string;
@@ -13,6 +14,7 @@ export interface AddKeyParams {
 }
 
 export interface UpdateKeyParams {
+  [key: string]: unknown;
   name: string;
   environment: string;
   value?: string;

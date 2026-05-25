@@ -5,7 +5,7 @@ import { listKeys, getKeyValue, deleteKey, testConnectivity } from "@/api";
 import { useUIStore } from "@/store";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
-  ArrowLeft, Eye, EyeOff, Copy, Pencil, Trash2, Link2, Tag, Clock, Hash, Layers,
+  ArrowLeft, Eye, Copy, Pencil, Trash2, Link2, Tag, Clock, Hash,
 } from "lucide-react";
 
 export function KeyDetailPage() {
