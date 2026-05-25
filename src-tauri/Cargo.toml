@@ -1,0 +1,42 @@
+[package]
+name = "apikey-vault-tauri"
+version = "1.0.0"
+edition = "2021"
+description = "API Key Vault - Tauri Application"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "apikey_vault_tauri_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
+
+apikey-vault-core = { path = "../src-core" }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

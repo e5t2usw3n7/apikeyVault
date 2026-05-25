@@ -1,110 +1,19 @@
-[package]
-name = "apikey-vault"
+[workspace]
+members = [
+    "src-core",
+    "src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
 version = "1.0.0"
 edition = "2021"
-description = "A secure API key management tool"
 license = "MIT OR Apache-2.0"
-keywords = ["api-key", "security", "vault", "secrets"]
-categories = ["command-line-utilities", "cryptography"]
 
-[dependencies]
-# CLI 框架
-clap = { version = "4", features = ["derive", "cargo"] }
-clap_complete = "4"
-
-# TUI 框架
-ratatui = "0.26"
-crossterm = "0.27"
-
-# 桌面 GUI (egui/eframe)
-eframe = "0.29"
-
-# 加密
-aes-gcm = "0.10"
-argon2 = "0.5"
-rand = "0.8"
-sha2 = "0.10"
-hmac = "0.12"
-zeroize = { version = "1", features = ["derive"] }
-secrecy = "0.8"
-chacha20poly1305 = "0.10"
-
-# 数据库
-rusqlite = { version = "0.31", features = ["bundled"] }
-
-# 序列化
+[workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
-csv = "1"
-
-# 时间处理
-chrono = { version = "0.4", features = ["serde"] }
-
-# UUID
-uuid = { version = "1", features = ["v4", "v7", "serde"] }
-
-# 错误处理
 thiserror = "1"
 anyhow = "1"
-
-# 日志
 tracing = "0.1"
 tracing-subscriber = "0.3"
-
-# 剪贴板
-arboard = "3"
-
-# 正则表达式
-regex = "1"
-
-# 文件路径
-dirs = "5"
-path-clean = "1"
-
-# 终端颜色
-colored = "2"
-
-# 交互式输入
-dialoguer = "0.11"
-inquire = "0.7"
-
-# 进度条
-indicatif = "0.17"
-
-# 密码强度检查
-zxcvbn = "3"
-
-# 图标处理
-image = { version = "0.25", default-features = false, features = ["ico"] }
-
-# 表格打印
-comfy-table = "7"
-
-# 配置文件监控
-notify = "6"
-
-# HTTP 客户端（用于 API 验证）
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"], optional = true }
-
-# base64
-base64 = "0.22"
-
-# 多线程
-crossbeam-channel = "0.5"
-
-[features]
-default = ["api-validation"]
-api-validation = ["reqwest"]
-
-[dev-dependencies]
-tempfile = "3"
-assert_cmd = "2"
-predicates = "3"
-serial_test = "3"
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true

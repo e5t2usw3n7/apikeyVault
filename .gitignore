@@ -42,5 +42,8 @@ Thumbs.db
 # Session files
 *.session
 
+# Release binaries
+release/
+
 # Project notes
 part.md
