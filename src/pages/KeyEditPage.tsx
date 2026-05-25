@@ -16,8 +16,8 @@ const PROVIDERS = [
   { value: "deepseek", label: "DeepSeek", url: "https://api.deepseek.com" },
   { value: "google", label: "Google (Gemini)", url: "https://generativelanguage.googleapis.com" },
   { value: "gemini", label: "Gemini", url: "https://generativelanguage.googleapis.com" },
-  { value: "小米mimo", label: "小米 MiMo", url: "https://token-plan-cn.xiaomimimo.com" },
-  { value: "custom", label: "自定义提供商", url: "" },
+  { value: "xiaomi-mimo", label: "Xiaomi MiMo", url: "https://token-plan-cn.xiaomimimo.com" },
+  { value: "custom", label: "自定义提供商 / Custom Provider", url: "" },
 ];
 
 export function KeyEditPage() {
