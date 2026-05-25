@@ -1,10 +1,46 @@
-# 目标产物
+# Rust
 /target
+**/*.rs.bk
 
+# Node
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
 
-# AI做的阶段性总结
+# Tauri
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code / AI tools
+.claw/
+.clawd-todos.json
+CLAUDE.md
 summary.md
 
-# clawcode用的文档
-CLAUDE.md
-.clawd-todos.json
+# Sandbox
+.sandbox-home/
+.sandbox-tmp/
+
+# Test artifacts
+test_screenshots/
+test_webapp.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Session files
+*.session
+
+# Project notes
+part.md
