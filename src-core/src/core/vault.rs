@@ -332,11 +332,8 @@ impl Vault {
         Ok(())
     }
 
-    /// 锁定 Vault
+    /// 锁定 Vault（保留会话文件，重启后自动恢复）
     pub fn lock(&mut self) {
-        // 清除会话文件（锁定后不可恢复）
-        self.clear_session();
-
         if let Some(ref mut key) = self.master_key {
             zeroize::Zeroize::zeroize(key);
         }
