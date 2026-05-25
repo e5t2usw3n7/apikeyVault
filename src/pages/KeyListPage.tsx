@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listKeys, deleteKey, testConnectivity } from "@/api";
+import { listKeys, getKeyValue, deleteKey, testConnectivity } from "@/api";
 import { useUIStore } from "@/store";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { KeyEntry, Environment } from "@/types";
-import { Search, Plus, Link2, Pencil, Trash2, Filter } from "lucide-react";
+import { Search, Plus, Link2, Pencil, Trash2, Filter, Copy } from "lucide-react";
 
 export function KeyListPage() {
   const navigate = useNavigate();
@@ -32,6 +32,16 @@ export function KeyListPage() {
     onSuccess: (result) => addNotification(result.success ? "success" : "error", result.message),
     onError: (err) => addNotification("error", `测试失败: ${err}`),
   });
+
+  const copyKey = async (key: KeyEntry) => {
+    try {
+      const value = await getKeyValue(key.name, key.environment);
+      await navigator.clipboard.writeText(value);
+      addNotification("success", `"${key.name}" 已复制到剪贴板`);
+    } catch (err) {
+      addNotification("error", `复制失败: ${err}`);
+    }
+  };
 
   const filteredKeys = keys.filter((key) => {
     const matchesSearch =
@@ -158,6 +168,16 @@ export function KeyListPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => copyKey(key)}
+                        className="p-1.5 rounded-md transition-smooth"
+                        style={{ color: "var(--text-muted)" }}
+                        title="复制密钥值"
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <Copy size={14} />
+                      </button>
                       <button
                         onClick={() => testMutation.mutate(key)}
                         className="p-1.5 rounded-md transition-smooth"
