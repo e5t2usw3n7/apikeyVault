@@ -3,9 +3,9 @@ pub mod commands;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// apikey_etorer - 安全的 API 密钥管理工具
+/// API Key Vault - 安全的 API 密钥管理工具
 #[derive(Parser)]
-#[command(name = "apikey-etorer")]
+#[command(name = "apikey-vault")]
 #[command(version = "1.0.0")]
 #[command(about = "安全的 API 密钥管理工具", long_about = None)]
 pub struct Cli {

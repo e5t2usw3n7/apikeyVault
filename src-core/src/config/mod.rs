@@ -17,7 +17,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         let vault_path = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("apikey_etorer");
+            .join("apikey-vault");
 
         Self {
             vault_path,
@@ -36,7 +36,7 @@ impl AppConfig {
     pub fn config_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("apikey_etorer")
+            .join("apikey-vault")
             .join("config.toml")
     }
 
