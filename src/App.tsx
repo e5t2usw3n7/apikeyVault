@@ -14,7 +14,9 @@ import { ImportExportPage } from "@/pages/ImportExportPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
 export default function App() {
-  const { state, checkStatus, restoreSession } = useVaultStore();
+  const state = useVaultStore((s) => s.state);
+  const checkStatus = useVaultStore((s) => s.checkStatus);
+  const restoreSession = useVaultStore((s) => s.restoreSession);
   const theme = useUIStore((s) => s.theme);
 
   useEffect(() => {
@@ -33,7 +35,8 @@ export default function App() {
       }
     };
     init();
-  }, [checkStatus, restoreSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (state !== "unlocked") {
     return <LoginPage />;
