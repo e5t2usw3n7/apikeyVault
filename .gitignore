@@ -18,17 +18,29 @@ src-tauri/target/
 *.swp
 *.swo
 
+# Claude Code / AI tools
+.claw/
+.clawd-todos.json
+CLAUDE.md
+summary.md
+
+# Sandbox
+.sandbox-home/
+.sandbox-tmp/
+
+# Test artifacts
+test_screenshots/
+test_webapp.py
+
 # OS
 .DS_Store
 Thumbs.db
-
-# AI
-summary.md
-CLAUDE.md
-.clawd-todos.json
 
 # Logs
 *.log
 
 # Session files
 *.session
+
+# Project notes
+part.md
