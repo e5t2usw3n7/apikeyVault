@@ -31,14 +31,6 @@ export interface KeyEntry {
   version: number;
 }
 
-export interface KeyFilter {
-  environment?: Environment;
-  provider?: string;
-  key_type?: KeyType;
-  group_id?: string;
-  search_query?: string;
-}
-
 export interface ConnectivityResult {
   success: boolean;
   message: string;

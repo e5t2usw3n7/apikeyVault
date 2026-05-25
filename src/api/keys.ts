@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { KeyEntry, KeyFilter, ConnectivityResult } from "@/types";
+import type { KeyEntry, ConnectivityResult } from "@/types";
 
 export interface AddKeyParams {
   name: string;

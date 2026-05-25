@@ -20,7 +20,6 @@ pub fn run() {
             commands::auth::vault_unlock,
             commands::auth::vault_lock,
             commands::auth::vault_try_restore_session,
-            commands::auth::vault_change_password,
             commands::keys::list_keys,
             commands::keys::search_keys,
             commands::keys::get_key_value,

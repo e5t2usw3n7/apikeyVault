@@ -55,7 +55,7 @@ impl Database {
 
     fn create_tables(&self) -> Result<(), ApiKeyError> {
         self.conn
-            .execute_batch(include_str!("../../migrations/001_initial.sql"))
+            .execute_batch(include_str!("../../../migrations/001_initial.sql"))
             .map_err(|e| ApiKeyError::Database(format!("Failed to create tables: {}", e)))?;
         Ok(())
     }
