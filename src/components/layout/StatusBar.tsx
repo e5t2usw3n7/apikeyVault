@@ -1,29 +1,34 @@
 import { useVaultStore } from "@/store";
+import { Shield, ShieldCheck, ShieldAlert } from "lucide-react";
 
 export function StatusBar() {
   const vaultState = useVaultStore((s) => s.state);
 
+  const stateConfig = {
+    unlocked: { icon: ShieldCheck, label: "已解锁", color: "var(--status-success)" },
+    locked: { icon: ShieldAlert, label: "已锁定", color: "var(--status-warning)" },
+    uninitialized: { icon: Shield, label: "未初始化", color: "var(--text-muted)" },
+  };
+
+  const config = stateConfig[vaultState];
+  const Icon = config.icon;
+
   return (
-    <footer className="bg-vault-surface border-t border-vault-border px-4 py-2 flex items-center justify-between text-sm text-vault-muted">
-      <div className="flex items-center space-x-4">
+    <footer
+      className="h-8 flex items-center justify-between px-4 text-xs shrink-0"
+      style={{
+        background: "var(--bg-secondary)",
+        borderTop: "1px solid var(--border-default)",
+        color: "var(--text-muted)",
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <Icon size={12} style={{ color: config.color }} />
         <span>
-          状态:{" "}
-          <span
-            className={
-              vaultState === "unlocked"
-                ? "text-vault-success"
-                : "text-vault-warning"
-            }
-          >
-            {vaultState === "unlocked"
-              ? "已解锁"
-              : vaultState === "locked"
-              ? "已锁定"
-              : "未初始化"}
-          </span>
+          状态: <span style={{ color: config.color }}>{config.label}</span>
         </span>
       </div>
-      <div>API Key Vault v1.0.0</div>
+      <span>API Key Vault v1.0.0</span>
     </footer>
   );
 }

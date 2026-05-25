@@ -5,20 +5,17 @@ import { listKeys, deleteKey, testConnectivity } from "@/api";
 import { useUIStore } from "@/store";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { KeyEntry, Environment } from "@/types";
+import { Search, Plus, Link2, Pencil, Trash2, Filter } from "lucide-react";
 
 export function KeyListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addNotification = useUIStore((s) => s.addNotification);
-
   const [search, setSearch] = useState("");
   const [envFilter, setEnvFilter] = useState<Environment | "">("");
   const [deleteTarget, setDeleteTarget] = useState<KeyEntry | null>(null);
 
-  const { data: keys = [], isLoading } = useQuery({
-    queryKey: ["keys"],
-    queryFn: listKeys,
-  });
+  const { data: keys = [], isLoading } = useQuery({ queryKey: ["keys"], queryFn: listKeys });
 
   const deleteMutation = useMutation({
     mutationFn: (key: KeyEntry) => deleteKey(key.name, key.environment),
@@ -32,12 +29,7 @@ export function KeyListPage() {
 
   const testMutation = useMutation({
     mutationFn: (key: KeyEntry) => testConnectivity(key.name, key.environment),
-    onSuccess: (result) => {
-      addNotification(
-        result.success ? "success" : "error",
-        result.message
-      );
-    },
+    onSuccess: (result) => addNotification(result.success ? "success" : "error", result.message),
     onError: (err) => addNotification("error", `测试失败: ${err}`),
   });
 
@@ -50,128 +42,167 @@ export function KeyListPage() {
     return matchesSearch && matchesEnv;
   });
 
-  const environments: Environment[] = [
-    "Production",
-    "Staging",
-    "Development",
-    "Testing",
-  ];
+  const environments: Environment[] = ["Production", "Staging", "Development", "Testing"];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-vault-text">密钥管理</h2>
+        <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>
+          密钥管理
+        </h2>
         <button
           onClick={() => navigate("/keys/new")}
-          className="px-4 py-2 bg-vault-primary hover:bg-vault-primary/80 text-white rounded-lg"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-smooth"
+          style={{ background: "var(--brand-primary)", color: "white" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--brand-primary-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "var(--brand-primary)")}
         >
+          <Plus size={16} />
           添加密钥
         </button>
       </div>
 
-      {/* 搜索和筛选 */}
-      <div className="flex gap-4">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索密钥名称或提供商..."
-          className="flex-1 px-4 py-2 rounded-lg bg-vault-surface border border-vault-border text-vault-text focus:outline-none focus:border-vault-primary"
-        />
-        <select
-          value={envFilter}
-          onChange={(e) => setEnvFilter(e.target.value as Environment | "")}
-          className="px-4 py-2 rounded-lg bg-vault-surface border border-vault-border text-vault-text"
-        >
-          <option value="">所有环境</option>
-          {environments.map((env) => (
-            <option key={env} value={env}>
-              {env}
-            </option>
-          ))}
-        </select>
+      {/* Search and filter */}
+      <div className="flex gap-3">
+        <div className="flex-1 relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索密钥名称或提供商..."
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm transition-smooth"
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              color: "var(--text-primary)",
+              outline: "none",
+            }}
+            onFocus={(e) => (e.target.style.borderColor = "var(--brand-primary)")}
+            onBlur={(e) => (e.target.style.borderColor = "var(--border-default)")}
+          />
+        </div>
+        <div className="relative">
+          <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--text-muted)" }} />
+          <select
+            value={envFilter}
+            onChange={(e) => setEnvFilter(e.target.value as Environment | "")}
+            className="pl-10 pr-4 py-2.5 rounded-xl text-sm appearance-none transition-smooth"
+            style={{
+              background: "var(--bg-surface)",
+              border: "1px solid var(--border-default)",
+              color: "var(--text-primary)",
+              outline: "none",
+              minWidth: 150,
+            }}
+          >
+            <option value="">所有环境</option>
+            {environments.map((env) => (
+              <option key={env} value={env}>{env}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {/* 密钥列表 */}
+      {/* Table */}
       {isLoading ? (
-        <div className="text-center py-8 text-vault-muted">加载中...</div>
+        <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>加载中...</div>
       ) : filteredKeys.length === 0 ? (
-        <div className="text-center py-8 text-vault-muted">暂无密钥</div>
+        <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>暂无密钥</div>
       ) : (
-        <div className="bg-vault-surface rounded-lg border border-vault-border overflow-hidden">
+        <div
+          className="rounded-xl overflow-hidden"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}
+        >
           <table className="w-full">
             <thead>
-              <tr className="border-b border-vault-border">
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  名称
-                </th>
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  提供商
-                </th>
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  类型
-                </th>
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  环境
-                </th>
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  更新时间
-                </th>
-                <th className="px-4 py-3 text-right text-vault-muted font-medium">
-                  操作
-                </th>
+              <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+                {["名称", "提供商", "类型", "环境", "更新时间", "操作"].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left text-xs font-medium"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {filteredKeys.map((key) => (
+              {filteredKeys.map((key, i) => (
                 <tr
                   key={`${key.name}-${key.environment}`}
-                  className="border-b border-vault-border last:border-0 hover:bg-vault-bg/50"
+                  className="transition-smooth animate-fade-in"
+                  style={{
+                    borderBottom: i < filteredKeys.length - 1 ? "1px solid var(--border-default)" : "none",
+                    animationDelay: `${i * 30}ms`,
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   <td className="px-4 py-3">
                     <button
-                      onClick={() =>
-                        navigate(`/keys/${key.name}/${key.environment}`)
-                      }
-                      className="text-vault-primary hover:underline"
+                      onClick={() => navigate(`/keys/${key.name}/${key.environment}`)}
+                      className="text-sm font-medium transition-smooth"
+                      style={{ color: "var(--brand-primary)" }}
                     >
                       {key.name}
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-vault-muted">{key.provider}</td>
-                  <td className="px-4 py-3 text-vault-muted">{key.key_type}</td>
+                  <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
+                    {key.provider}
+                  </td>
+                  <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>
+                    {key.key_type}
+                  </td>
                   <td className="px-4 py-3">
-                    <span className="px-2 py-1 rounded text-xs bg-vault-primary/20 text-vault-primary">
+                    <span
+                      className="px-2 py-1 rounded-md text-xs font-medium"
+                      style={{
+                        background: "rgba(124,58,237,0.1)",
+                        color: "var(--brand-primary)",
+                      }}
+                    >
                       {key.environment}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-vault-muted text-sm">
+                  <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>
                     {new Date(key.updated_at).toLocaleDateString("zh-CN")}
                   </td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    <button
-                      onClick={() => testMutation.mutate(key)}
-                      className="text-vault-muted hover:text-vault-success text-sm"
-                      title="测试连通性"
-                    >
-                      🔗
-                    </button>
-                    <button
-                      onClick={() =>
-                        navigate(`/keys/${key.name}/${key.environment}/edit`)
-                      }
-                      className="text-vault-muted hover:text-vault-primary text-sm"
-                      title="编辑"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => setDeleteTarget(key)}
-                      className="text-vault-muted hover:text-vault-error text-sm"
-                      title="删除"
-                    >
-                      🗑️
-                    </button>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => testMutation.mutate(key)}
+                        className="p-1.5 rounded-md transition-smooth"
+                        style={{ color: "var(--text-muted)" }}
+                        title="测试连通性"
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <Link2 size={14} />
+                      </button>
+                      <button
+                        onClick={() => navigate(`/keys/${key.name}/${key.environment}/edit`)}
+                        className="p-1.5 rounded-md transition-smooth"
+                        style={{ color: "var(--text-muted)" }}
+                        title="编辑"
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(key)}
+                        className="p-1.5 rounded-md transition-smooth"
+                        style={{ color: "var(--status-error)" }}
+                        title="删除"
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--status-error-bg)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

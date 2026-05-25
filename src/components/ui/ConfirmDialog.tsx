@@ -1,3 +1,5 @@
+import { AlertTriangle, X } from "lucide-react";
+
 interface ConfirmDialogProps {
   isOpen: boolean;
   title: string;
@@ -21,28 +23,66 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
-  const buttonClass =
+  const confirmBg =
     variant === "danger"
-      ? "bg-vault-danger hover:bg-vault-danger/80"
+      ? "var(--status-error)"
       : variant === "warning"
-      ? "bg-vault-warning hover:bg-vault-warning/80"
-      : "bg-vault-primary hover:bg-vault-primary/80";
+      ? "var(--status-warning)"
+      : "var(--brand-primary)";
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-vault-surface rounded-lg p-6 max-w-md w-full mx-4">
-        <h3 className="text-lg font-semibold text-vault-text mb-2">{title}</h3>
-        <p className="text-vault-muted mb-6">{message}</p>
-        <div className="flex justify-end space-x-3">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in"
+      style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="glass-card p-6 max-w-md w-full mx-4 animate-scale-in"
+        style={{ background: "var(--bg-elevated)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-4">
+          {variant !== "default" && (
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+              style={{ background: variant === "danger" ? "var(--status-error-bg)" : "var(--status-warning-bg)" }}
+            >
+              <AlertTriangle size={20} style={{ color: confirmBg }} />
+            </div>
+          )}
+          <div className="flex-1">
+            <h3 className="text-base font-semibold" style={{ color: "var(--text-primary)" }}>
+              {title}
+            </h3>
+            <p className="mt-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+              {message}
+            </p>
+          </div>
           <button
             onClick={onCancel}
-            className="px-4 py-2 rounded bg-vault-border hover:bg-vault-border/80 text-vault-text"
+            className="p-1 rounded-md transition-smooth"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-smooth"
+            style={{
+              background: "var(--bg-surface)",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-default)",
+            }}
           >
             {cancelLabel}
           </button>
           <button
             onClick={onConfirm}
-            className={`px-4 py-2 rounded text-white ${buttonClass}`}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-smooth"
+            style={{ background: confirmBg, color: "white" }}
           >
             {confirmLabel}
           </button>

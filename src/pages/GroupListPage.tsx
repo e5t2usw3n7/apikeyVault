@@ -5,6 +5,7 @@ import { listGroups, deleteGroup } from "@/api";
 import { useUIStore } from "@/store";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import type { Group } from "@/types";
+import { Plus, Pencil, Trash2, FolderOpen } from "lucide-react";
 
 export function GroupListPage() {
   const navigate = useNavigate();
@@ -12,10 +13,7 @@ export function GroupListPage() {
   const addNotification = useUIStore((s) => s.addNotification);
   const [deleteTarget, setDeleteTarget] = useState<Group | null>(null);
 
-  const { data: groups = [], isLoading } = useQuery({
-    queryKey: ["groups"],
-    queryFn: listGroups,
-  });
+  const { data: groups = [], isLoading } = useQuery({ queryKey: ["groups"], queryFn: listGroups });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteGroup(id),
@@ -28,68 +26,56 @@ export function GroupListPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 animate-fade-in">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-vault-text">分组管理</h2>
+        <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>分组管理</h2>
         <button
           onClick={() => navigate("/groups/new")}
-          className="px-4 py-2 bg-vault-primary hover:bg-vault-primary/80 text-white rounded-lg"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-smooth"
+          style={{ background: "var(--brand-primary)", color: "white" }}
         >
-          创建分组
+          <Plus size={16} /> 创建分组
         </button>
       </div>
 
       {isLoading ? (
-        <div className="text-center py-8 text-vault-muted">加载中...</div>
+        <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>加载中...</div>
       ) : groups.length === 0 ? (
-        <div className="text-center py-8 text-vault-muted">暂无分组</div>
+        <div className="text-center py-12" style={{ color: "var(--text-muted)" }}>暂无分组</div>
       ) : (
-        <div className="bg-vault-surface rounded-lg border border-vault-border overflow-hidden">
+        <div className="rounded-xl overflow-hidden" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}>
           <table className="w-full">
             <thead>
-              <tr className="border-b border-vault-border">
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  名称
-                </th>
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  描述
-                </th>
-                <th className="px-4 py-3 text-left text-vault-muted font-medium">
-                  创建时间
-                </th>
-                <th className="px-4 py-3 text-right text-vault-muted font-medium">
-                  操作
-                </th>
+              <tr style={{ borderBottom: "1px solid var(--border-default)" }}>
+                {["名称", "描述", "创建时间", "操作"].map((h) => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-medium" style={{ color: "var(--text-muted)" }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {groups.map((group) => (
+              {groups.map((group, i) => (
                 <tr
                   key={group.id}
-                  className="border-b border-vault-border last:border-0 hover:bg-vault-bg/50"
+                  className="transition-smooth animate-fade-in"
+                  style={{ borderBottom: i < groups.length - 1 ? "1px solid var(--border-default)" : "none", animationDelay: `${i * 30}ms` }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
-                  <td className="px-4 py-3 text-vault-text font-medium">
-                    {group.name}
+                  <td className="px-4 py-3 flex items-center gap-2">
+                    <FolderOpen size={14} style={{ color: "var(--brand-primary)" }} />
+                    <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{group.name}</span>
                   </td>
-                  <td className="px-4 py-3 text-vault-muted">
-                    {group.description || "-"}
-                  </td>
-                  <td className="px-4 py-3 text-vault-muted text-sm">
-                    {new Date(group.created_at).toLocaleDateString("zh-CN")}
-                  </td>
-                  <td className="px-4 py-3 text-right space-x-2">
-                    <button
-                      onClick={() => navigate(`/groups/${group.id}/edit`)}
-                      className="text-vault-muted hover:text-vault-primary text-sm"
-                    >
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => setDeleteTarget(group)}
-                      className="text-vault-muted hover:text-vault-error text-sm"
-                    >
-                      🗑️
-                    </button>
+                  <td className="px-4 py-3 text-sm" style={{ color: "var(--text-secondary)" }}>{group.description || "-"}</td>
+                  <td className="px-4 py-3 text-xs" style={{ color: "var(--text-muted)" }}>{new Date(group.created_at).toLocaleDateString("zh-CN")}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => navigate(`/groups/${group.id}/edit`)} className="p-1.5 rounded-md transition-smooth" style={{ color: "var(--text-muted)" }} onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                        <Pencil size={14} />
+                      </button>
+                      <button onClick={() => setDeleteTarget(group)} className="p-1.5 rounded-md transition-smooth" style={{ color: "var(--status-error)" }} onMouseEnter={(e) => (e.currentTarget.style.background = "var(--status-error-bg)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -98,17 +84,7 @@ export function GroupListPage() {
         </div>
       )}
 
-      <ConfirmDialog
-        isOpen={!!deleteTarget}
-        title="删除分组"
-        message={`确定要删除分组 "${deleteTarget?.name}" 吗？分组内的密钥不会被删除。`}
-        confirmLabel="删除"
-        variant="danger"
-        onConfirm={() =>
-          deleteTarget && deleteMutation.mutate(deleteTarget.id)
-        }
-        onCancel={() => setDeleteTarget(null)}
-      />
+      <ConfirmDialog isOpen={!!deleteTarget} title="删除分组" message={`确定要删除分组 "${deleteTarget?.name}" 吗？`} confirmLabel="删除" variant="danger" onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)} onCancel={() => setDeleteTarget(null)} />
     </div>
   );
 }

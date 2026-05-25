@@ -4,22 +4,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listKeys, getKeyValue, deleteKey, testConnectivity } from "@/api";
 import { useUIStore } from "@/store";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import {
+  ArrowLeft, Eye, EyeOff, Copy, Pencil, Trash2, Link2, Tag, Clock, Hash, Layers,
+} from "lucide-react";
 
 export function KeyDetailPage() {
   const { name, env } = useParams<{ name: string; env: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addNotification = useUIStore((s) => s.addNotification);
-
   const [showValue, setShowValue] = useState(false);
   const [keyValue, setKeyValue] = useState<string | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const { data: keys = [] } = useQuery({
-    queryKey: ["keys"],
-    queryFn: listKeys,
-  });
-
+  const { data: keys = [] } = useQuery({ queryKey: ["keys"], queryFn: listKeys });
   const key = keys.find((k) => k.name === name && k.environment === env);
 
   const fetchValue = async () => {
@@ -29,7 +27,7 @@ export function KeyDetailPage() {
       setKeyValue(value);
       setShowValue(true);
     } catch (err) {
-      addNotification("error", `获取密钥值失败: ${err}`);
+      addNotification("error", `获取失败: ${err}`);
     }
   };
 
@@ -45,22 +43,24 @@ export function KeyDetailPage() {
 
   const testMutation = useMutation({
     mutationFn: () => testConnectivity(name!, env!),
-    onSuccess: (result) => {
-      addNotification(
-        result.success ? "success" : "error",
-        `${result.message}${result.latency_ms ? ` (${result.latency_ms}ms)` : ""}`
-      );
-    },
+    onSuccess: (result) =>
+      addNotification(result.success ? "success" : "error", `${result.message}${result.latency_ms ? ` (${result.latency_ms}ms)` : ""}`),
     onError: (err) => addNotification("error", `测试失败: ${err}`),
   });
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    addNotification("success", "已复制到剪贴板");
+  };
+
   if (!key) {
     return (
-      <div className="text-center py-8">
-        <p className="text-vault-muted">密钥未找到</p>
+      <div className="text-center py-12 animate-fade-in">
+        <p style={{ color: "var(--text-muted)" }}>密钥未找到</p>
         <button
           onClick={() => navigate("/keys")}
-          className="mt-4 text-vault-primary hover:underline"
+          className="mt-4 text-sm"
+          style={{ color: "var(--brand-primary)" }}
         >
           返回列表
         </button>
@@ -68,144 +68,136 @@ export function KeyDetailPage() {
     );
   }
 
+  const InfoCard = ({ label, value }: { label: string; value: string | number }) => (
+    <div className="flex items-center justify-between py-2">
+      <span className="text-xs" style={{ color: "var(--text-muted)" }}>{label}</span>
+      <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{value}</span>
+    </div>
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 animate-fade-in max-w-3xl">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/keys")}
-            className="text-vault-muted hover:text-vault-text"
+            className="p-2 rounded-lg transition-smooth"
+            style={{ color: "var(--text-muted)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
-            ← 返回
+            <ArrowLeft size={18} />
           </button>
-          <h2 className="text-2xl font-bold text-vault-text">{key.name}</h2>
+          <div>
+            <h2 className="text-xl font-bold" style={{ color: "var(--text-primary)" }}>{key.name}</h2>
+            <span
+              className="px-2 py-0.5 rounded-md text-xs font-medium"
+              style={{ background: "rgba(124,58,237,0.1)", color: "var(--brand-primary)" }}
+            >
+              {key.environment}
+            </span>
+          </div>
         </div>
-        <div className="flex space-x-3">
+        <div className="flex gap-2">
           <button
             onClick={() => testMutation.mutate()}
-            className="px-4 py-2 bg-vault-surface border border-vault-border hover:bg-vault-border rounded-lg text-vault-text"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-smooth"
+            style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)", color: "var(--text-secondary)" }}
           >
-            测试连通性
+            <Link2 size={14} /> 测试连通性
           </button>
           <button
             onClick={() => navigate(`/keys/${name}/${env}/edit`)}
-            className="px-4 py-2 bg-vault-primary hover:bg-vault-primary/80 text-white rounded-lg"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-smooth"
+            style={{ background: "var(--brand-primary)", color: "white" }}
           >
-            编辑
+            <Pencil size={14} /> 编辑
           </button>
           <button
             onClick={() => setShowDeleteDialog(true)}
-            className="px-4 py-2 bg-vault-danger hover:bg-vault-danger/80 text-white rounded-lg"
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-smooth"
+            style={{ background: "var(--status-error-bg)", color: "var(--status-error)", border: "1px solid rgba(239,68,68,0.2)" }}
           >
-            删除
+            <Trash2 size={14} /> 删除
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 基本信息 */}
-        <div className="bg-vault-surface rounded-lg p-6 border border-vault-border">
-          <h3 className="text-lg font-semibold text-vault-text mb-4">基本信息</h3>
-          <dl className="space-y-3">
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">提供商</dt>
-              <dd className="text-vault-text">{key.provider}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">类型</dt>
-              <dd className="text-vault-text">{key.key_type}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">环境</dt>
-              <dd>
-                <span className="px-2 py-1 rounded text-xs bg-vault-primary/20 text-vault-primary">
-                  {key.environment}
-                </span>
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">版本</dt>
-              <dd className="text-vault-text">{key.version}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">使用次数</dt>
-              <dd className="text-vault-text">{key.usage_count}</dd>
-            </div>
-          </dl>
+      <div className="grid grid-cols-2 gap-4">
+        {/* Basic info */}
+        <div className="p-5 rounded-xl" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}>
+          <h3 className="text-sm font-semibold mb-3" style={{ color: "var(--text-primary)" }}>基本信息</h3>
+          <InfoCard label="提供商" value={key.provider} />
+          <InfoCard label="类型" value={key.key_type} />
+          <InfoCard label="版本" value={key.version} />
+          <InfoCard label="使用次数" value={key.usage_count} />
         </div>
 
-        {/* 时间信息 */}
-        <div className="bg-vault-surface rounded-lg p-6 border border-vault-border">
-          <h3 className="text-lg font-semibold text-vault-text mb-4">时间信息</h3>
-          <dl className="space-y-3">
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">创建时间</dt>
-              <dd className="text-vault-text">
-                {new Date(key.created_at).toLocaleString("zh-CN")}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-vault-muted">更新时间</dt>
-              <dd className="text-vault-text">
-                {new Date(key.updated_at).toLocaleString("zh-CN")}
-              </dd>
-            </div>
-            {key.expires_at && (
-              <div className="flex justify-between">
-                <dt className="text-vault-muted">过期时间</dt>
-                <dd className="text-vault-text">
-                  {new Date(key.expires_at).toLocaleString("zh-CN")}
-                </dd>
-              </div>
-            )}
-            {key.last_used_at && (
-              <div className="flex justify-between">
-                <dt className="text-vault-muted">最后使用</dt>
-                <dd className="text-vault-text">
-                  {new Date(key.last_used_at).toLocaleString("zh-CN")}
-                </dd>
-              </div>
-            )}
-          </dl>
+        {/* Time info */}
+        <div className="p-5 rounded-xl" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}>
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+            <Clock size={14} /> 时间信息
+          </h3>
+          <InfoCard label="创建时间" value={new Date(key.created_at).toLocaleString("zh-CN")} />
+          <InfoCard label="更新时间" value={new Date(key.updated_at).toLocaleString("zh-CN")} />
+          {key.expires_at && <InfoCard label="过期时间" value={new Date(key.expires_at).toLocaleString("zh-CN")} />}
+          {key.last_used_at && <InfoCard label="最后使用" value={new Date(key.last_used_at).toLocaleString("zh-CN")} />}
         </div>
+      </div>
 
-        {/* 描述和标签 */}
-        <div className="bg-vault-surface rounded-lg p-6 border border-vault-border lg:col-span-2">
-          <h3 className="text-lg font-semibold text-vault-text mb-4">描述和标签</h3>
-          {key.description && (
-            <p className="text-vault-muted mb-4">{key.description}</p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {key.tags.map((tag) => (
-              <span
-                key={tag}
-                className="px-3 py-1 rounded-full bg-vault-border text-vault-text text-sm"
-              >
-                {tag}
-              </span>
-            ))}
-            {key.tags.length === 0 && (
-              <span className="text-vault-muted">无标签</span>
-            )}
-          </div>
-        </div>
-
-        {/* 密钥值 */}
-        <div className="bg-vault-surface rounded-lg p-6 border border-vault-border lg:col-span-2">
-          <h3 className="text-lg font-semibold text-vault-text mb-4">密钥值</h3>
-          {showValue && keyValue ? (
-            <div className="bg-vault-bg rounded-lg p-4 font-mono text-sm break-all">
-              {keyValue}
-            </div>
-          ) : (
-            <button
-              onClick={fetchValue}
-              className="px-4 py-2 bg-vault-border hover:bg-vault-border/80 rounded-lg text-vault-text"
+      {/* Tags */}
+      <div className="p-5 rounded-xl" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}>
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+          <Tag size={14} /> 标签
+        </h3>
+        <div className="flex flex-wrap gap-2">
+          {key.tags.length > 0 ? key.tags.map((tag) => (
+            <span
+              key={tag}
+              className="px-3 py-1 rounded-full text-xs"
+              style={{ background: "var(--bg-surface-hover)", color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
             >
-              显示密钥值
-            </button>
+              {tag}
+            </span>
+          )) : (
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>无标签</span>
           )}
         </div>
+      </div>
+
+      {/* Key value */}
+      <div className="p-5 rounded-xl" style={{ background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}>
+        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: "var(--text-primary)" }}>
+          <Hash size={14} /> 密钥值
+        </h3>
+        {showValue && keyValue ? (
+          <div className="flex items-center gap-2">
+            <code
+              className="flex-1 px-4 py-3 rounded-lg text-xs break-all"
+              style={{ background: "var(--bg-primary)", color: "var(--text-primary)", fontFamily: "monospace" }}
+            >
+              {keyValue}
+            </code>
+            <button
+              onClick={() => copyToClipboard(keyValue)}
+              className="p-2 rounded-lg transition-smooth"
+              style={{ color: "var(--text-muted)" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              <Copy size={16} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={fetchValue}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-smooth"
+            style={{ background: "var(--bg-surface-hover)", color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
+          >
+            <Eye size={14} /> 显示密钥值
+          </button>
+        )}
       </div>
 
       <ConfirmDialog

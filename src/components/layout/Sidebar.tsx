@@ -1,13 +1,27 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { useVaultStore, useUIStore } from "@/store";
+import {
+  LayoutDashboard,
+  KeyRound,
+  FolderOpen,
+  ScrollText,
+  ArrowDownUp,
+  Settings,
+  Lock,
+  Sun,
+  Moon,
+  ChevronLeft,
+  ChevronRight,
+  Shield,
+} from "lucide-react";
 
 const navItems = [
-  { path: "/", label: "仪表盘", icon: "📊" },
-  { path: "/keys", label: "密钥管理", icon: "🔑" },
-  { path: "/groups", label: "分组管理", icon: "📁" },
-  { path: "/audit", label: "审计日志", icon: "📋" },
-  { path: "/import-export", label: "导入导出", icon: "📤" },
-  { path: "/settings", label: "设置", icon: "⚙️" },
+  { path: "/", label: "仪表盘", icon: LayoutDashboard },
+  { path: "/keys", label: "密钥管理", icon: KeyRound },
+  { path: "/groups", label: "分组管理", icon: FolderOpen },
+  { path: "/audit", label: "审计日志", icon: ScrollText },
+  { path: "/import-export", label: "导入导出", icon: ArrowDownUp },
+  { path: "/settings", label: "设置", icon: Settings },
 ];
 
 export function Sidebar() {
@@ -18,59 +32,90 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`bg-vault-surface border-r border-vault-border flex flex-col transition-all duration-300 ${
-        sidebarCollapsed ? "w-16" : "w-56"
-      }`}
+      className="flex flex-col transition-all duration-300 ease-out"
+      style={{
+        width: sidebarCollapsed ? 72 : 240,
+        background: "var(--bg-secondary)",
+        borderRight: "1px solid var(--border-default)",
+      }}
     >
-      <div className="p-4 border-b border-vault-border flex items-center justify-between">
+      {/* Logo */}
+      <div
+        className="flex items-center gap-3 px-5 h-16 shrink-0"
+        style={{ borderBottom: "1px solid var(--border-default)" }}
+      >
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ background: "var(--brand-primary)" }}
+        >
+          <Shield size={18} color="white" />
+        </div>
         {!sidebarCollapsed && (
-          <h1 className="text-lg font-bold text-vault-primary truncate">
+          <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
             API Key Vault
-          </h1>
+          </span>
         )}
         <button
           onClick={toggleSidebar}
-          className="p-1 hover:bg-vault-border rounded"
+          className="ml-auto p-1.5 rounded-md transition-smooth"
+          style={{ color: "var(--text-muted)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
-          {sidebarCollapsed ? "→" : "←"}
+          {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
 
-      <nav className="flex-1 py-4">
-        {navItems.map((item) => (
-          <button
-            key={item.path}
-            onClick={() => navigate(item.path)}
-            className={`w-full flex items-center px-4 py-3 hover:bg-vault-border transition-colors ${
-              location.pathname === item.path
-                ? "bg-vault-primary/20 text-vault-primary border-r-2 border-vault-primary"
-                : "text-vault-muted"
-            }`}
-          >
-            <span className="text-xl">{item.icon}</span>
-            {!sidebarCollapsed && (
-              <span className="ml-3 truncate">{item.label}</span>
-            )}
-          </button>
-        ))}
+      {/* Navigation */}
+      <nav className="flex-1 py-3 px-3 space-y-1">
+        {navItems.map((item) => {
+          const isActive = location.pathname === item.path;
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.path}
+              onClick={() => navigate(item.path)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-smooth text-sm"
+              style={{
+                background: isActive ? "rgba(124, 58, 237, 0.12)" : "transparent",
+                color: isActive ? "var(--brand-primary)" : "var(--text-secondary)",
+                fontWeight: isActive ? 500 : 400,
+              }}
+              onMouseEnter={(e) => {
+                if (!isActive) e.currentTarget.style.background = "var(--bg-surface-hover)";
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive) e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <Icon size={18} strokeWidth={isActive ? 2 : 1.5} />
+              {!sidebarCollapsed && <span>{item.label}</span>}
+            </button>
+          );
+        })}
       </nav>
 
-      <div className="p-4 border-t border-vault-border space-y-2">
+      {/* Bottom actions */}
+      <div className="p-3 space-y-1" style={{ borderTop: "1px solid var(--border-default)" }}>
         <button
           onClick={toggleTheme}
-          className="w-full flex items-center px-3 py-2 hover:bg-vault-border rounded text-vault-muted"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-smooth text-sm"
+          style={{ color: "var(--text-secondary)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-surface-hover)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
-          <span>{theme === "dark" ? "🌙" : "☀️"}</span>
-          {!sidebarCollapsed && (
-            <span className="ml-3">{theme === "dark" ? "深色" : "浅色"}模式</span>
-          )}
+          {theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
+          {!sidebarCollapsed && <span>{theme === "dark" ? "深色模式" : "浅色模式"}</span>}
         </button>
         <button
           onClick={lock}
-          className="w-full flex items-center px-3 py-2 hover:bg-vault-border rounded text-vault-error"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-smooth text-sm"
+          style={{ color: "var(--status-error)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--status-error-bg)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
         >
-          <span>🔒</span>
-          {!sidebarCollapsed && <span className="ml-3">锁定</span>}
+          <Lock size={18} strokeWidth={1.5} />
+          {!sidebarCollapsed && <span>锁定</span>}
         </button>
       </div>
     </aside>
