@@ -46,12 +46,19 @@ pub struct Vault {
 
 impl Vault {
     pub fn new(config: AppConfig) -> Self {
+        let db_path = config.vault_path.join("vault.db");
+        let state = if db_path.exists() {
+            VaultState::Locked
+        } else {
+            VaultState::Uninitialized
+        };
+
         Self {
             config,
             db: None,
             session_enabled: true,
             master_key: None,
-            state: VaultState::Uninitialized,
+            state,
             last_activity: None,
         }
     }
